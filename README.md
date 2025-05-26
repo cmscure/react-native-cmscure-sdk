@@ -41,7 +41,7 @@ Autolinking should handle most of the setup. Ensure your project meets the minim
 Before using any SDK features, you **must** configure it with your project credentials. This is typically done once when your application starts, for example, in your `App.js` or `App.tsx`. The SDK connects to the official CMSCure backend and WebSocket servers.
 
 ```javascript
-import CMSCureSDK from 'react-native-cmscure-sdk';
+import CMSCureSDK from '@cmscure/react-native-cmscure-sdk';
 import { useEffect } from 'react';
 
 const App = () => {
@@ -151,7 +151,7 @@ Listen for content changes pushed from the CMSCure backend.
 
 ```javascript
 import { useEffect } from 'react';
-import CMSCureSDK from 'react-native-cmscure-sdk';
+import CMSCureSDK from '@cmscure/react-native-cmscure-sdk';
 
 // Inside your component
 useEffect(() => {
