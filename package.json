@@ -1,0 +1,63 @@
+{
+  "name": "react-native-cmscure-sdk",
+  "version": "0.1.0",
+  "description": "React Native SDK for integrating with the CMSCure platform, providing dynamic content, translations, and real-time updates via WebSockets.",
+  "main": "src/index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "typescript": "tsc --noEmit --skipLibCheck"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cmscure/react-native-cmscure-sdk.git"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "cmscure",
+    "cms",
+    "sdk",
+    "dynamic-content",
+    "translations",
+    "localization",
+    "content-management",
+    "websockets",
+    "real-time"
+  ],
+  "author": {
+    "name": "CMSCure",
+    "email": "hamza@reignsol.com",
+    "url": "https://cmscure.com"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cmscure/react-native-cmscure-sdk/issues"
+  },
+  "homepage": "https://github.com/cmscure/react-native-cmscure-sdk#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.2",
+    "react-native": ">=0.71.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-native": "^0.71.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "android/",
+    "ios/",
+    "src/",
+    "index.d.ts"
+  ],
+  "react-native": "src/index.js",
+  "source": "src/index.js"
+}

@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+*.swp
+
+# IDE and editor files
+.idea/
+*.iml
+*.vscode/
+*.xcworkspace/
+*.xcodeproj/xcuserdata/
+
+# Build artifacts / Caches
+/android/build/
+/android/.gradle/
+/android/app/build/ # If you have an example app within
+/ios/build/
+/ios/Pods/ # Users will run pod install themselves
+DerivedData/
+
+# Node modules (should never be published for a library)
+node_modules/
+yarn-error.log
+npm-debug.log
+package-lock.json # Usually not for libraries, let consuming app resolve
+yarn.lock         # Usually not for libraries
+
+# Log files
+*.log
+
+# Local config files
+.env*
+local.properties
+
+# Other OS specific
+Thumbs.db

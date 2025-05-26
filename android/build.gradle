@@ -1,0 +1,62 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android' // Apply Kotlin plugin
+
+// Get the React Native version from the root project
+def getReactNativeMinorVersion() {
+    String reactNativeVersion = findProperty('REACT_NATIVE_VERSION')
+    if (reactNativeVersion == null) {
+        println "Warning: REACT_NATIVE_VERSION not found, using default for compileOnly."
+        return 71 // Example default, adjust as necessary
+    }
+    return reactNativeVersion.split('.')[1].toInteger()
+}
+
+android {
+    // Use compileSdkVersion and buildToolsVersion from the root project
+    namespace "com.reactnativecmscuresdk"
+    compileSdkVersion rootProject.ext.compileSdkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-native:+' 
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$rootProject.ext.kotlinVersion" // Use jdk8 variant
+
+    // Dependencies for your CMSCureSDK.kt
+    implementation 'com.google.code.gson:gson:2.8.8' // Or a newer compatible version
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3' // Or a newer compatible version
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.9.3' // Match okhttp version
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation 'io.socket:socket.io-client:2.0.1' // Or the version your SDK uses
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4' // Or a newer compatible version
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4' // Match coroutines-core
+}
