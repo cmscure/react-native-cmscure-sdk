@@ -19,7 +19,7 @@ The official React Native SDK for CMSCure. Integrate a powerful, real-time, and 
 ### Prerequisites
 
 -   **React Native**: >= 0.71
--   **iOS Target**: 13.0 or higher
+-   **iOS Target**: 14.0 or higher
 -   **Android `minSdkVersion`**: 26 or higher (Android 8.0 Oreo)
 
 ### Step 1: Add the Package
