@@ -2,7 +2,7 @@
 
 The official React Native SDK for CMSCure. Integrate a powerful, real-time, and multi-language CMS into your React Native application with ease.
 
-[![NPM Version](https://img.shields.io/npm/v/react-native-cmscure-sdk.svg)](https://www.npmjs.com/package/react-native-cmscure-sdk)
+[![NPM Version](https://img.shields.io/npm/v/@cmscure/react-native-cmscure-sdk.svg)](https://www.npmjs.com/package/react-native-cmscure-sdk)
 [![License](https://img.shields.io/npm/l/react-native-cmscure-sdk.svg)](https://github.com/your-repo/react-native-cmscure-sdk/blob/main/LICENSE)
 
 ## Features
