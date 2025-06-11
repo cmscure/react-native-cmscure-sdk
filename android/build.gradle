@@ -59,4 +59,5 @@ dependencies {
     implementation 'io.socket:socket.io-client:2.0.1' // Or the version your SDK uses
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4' // Or a newer compatible version
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4' // Match coroutines-core
+    implementation 'io.coil-kt:coil:2.4.0' 
 }

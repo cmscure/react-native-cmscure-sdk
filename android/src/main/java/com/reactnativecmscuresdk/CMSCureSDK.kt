@@ -1,4 +1,4 @@
-package com.reactnativecmscuresdk
+package com.cmscure.sdk
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresApi
+import coil.ImageLoader
+import coil.request.ImageRequest
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
@@ -25,6 +27,7 @@ import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -36,8 +39,6 @@ import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
-import java.util.Timer
-import java.util.TimerTask
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -52,7 +53,7 @@ import javax.crypto.spec.SecretKeySpec
  * - Configuration: Must be configured once with project-specific credentials via [configure].
  * - Authentication: Handles authentication with the backend.
  * - Data Caching: Stores fetched content (translations, colors) in an in-memory cache with disk persistence.
- * - Synchronization: Fetches content updates via API calls (polling) and real-time socket events.
+ * - Synchronization: Fetches content updates via API calls and real-time socket events.
  * - Language Management: Allows setting and retrieving the active language for content.
  * - Socket Communication: Manages a WebSocket connection for receiving live updates.
  * - Thread Safety: Uses synchronization mechanisms for safe access to shared resources.
@@ -134,13 +135,6 @@ object CMSCureSDK {
 
     private const val TAG = "CMSCureSDK" // Logcat Tag
 
-    private const val DEFAULT_SERVER_URL = "https://app.cmscure.com"
-    private const val DEFAULT_SOCKET_IO_URL = "wss://app.cmscure.com"
-
-    // This will hold the parsed URL objects after configure is called
-    private var actualServerUrl: URL? = null
-    private var actualSocketIOURLString: String? = null 
-
     /**
      * Data class holding the SDK's active configuration.
      * This is set internally when [configure] is called.
@@ -148,12 +142,15 @@ object CMSCureSDK {
      * @property projectId The unique identifier for your project in CMSCure.
      * @property apiKey The API key for authenticating requests with the CMSCure backend.
      * @property projectSecret The secret key associated with your project, used for legacy encryption and handshake validation. This is the initial secret provided during configuration.
+     * @property serverUrl The base URL for the CMSCure backend API.
+     * @property socketIOURLString The URL string for the CMSCure Socket.IO server.
      */
     data class CureConfiguration(
         val projectId: String,
         val apiKey: String,
-        val projectSecret: String // Initial secret from config, used to derive first key
+        val projectSecret: String
     )
+    data class ImageAsset(val key: String, val url: String)
 
     private var configuration: CureConfiguration? = null
     private val configLock = Any() // Synchronization lock for accessing 'configuration'
@@ -187,6 +184,8 @@ object CMSCureSDK {
     private const val CACHE_FILE_NAME = "cmscure_cache.json" // Filename for disk cache of translations/colors
     private const val TABS_FILE_NAME = "cmscure_tabs.json"   // Filename for disk cache of known tabs
     private var sharedPreferences: SharedPreferences? = null
+    private var serverUrlString: String = "https://app.cmscure.com" // Default production server URL
+    private var socketIOURLString: String = "wss://app.cmscure.com"
 
     // Retrofit service interface definition for API calls
     private interface ApiService {
@@ -198,15 +197,21 @@ object CMSCureSDK {
             @Path("projectId") projectId: String,
             @Path("tabName") tabName: String,
             @Header("X-API-Key") apiKey: String,
-            @Body requestBody: EncryptedPayload // Sync request body is encrypted
+            @Body requestBody: EncryptedPayload
         ): TranslationResponse
 
         @POST("/api/sdk/languages/{projectId}")
         suspend fun getAvailableLanguages(
             @Path("projectId") projectId: String,
             @Header("X-API-Key") apiKey: String,
-            @Body requestBody: Map<String, String> // Request body, e.g., {"projectId": "id"}
+            @Body requestBody: Map<String, String>
         ): LanguagesResponse
+
+        @GET("/api/sdk/images/{projectId}")
+        suspend fun getImages(
+            @Path("projectId") projectId: String,
+            @Header("X-API-Key") apiKey: String
+        ): List<ImageAsset>
     }
 
     // Data classes for structuring API requests and responses
@@ -238,6 +243,7 @@ object CMSCureSDK {
     private val mainThreadHandler = Handler(Looper.getMainLooper()) // Handler for posting results to the main (UI) thread
     private var applicationContext: Context? = null // Android Application Context
     private val gson: Gson = GsonBuilder().setLenient().create() // Lenient Gson for robust JSON parsing
+    private var imageLoader: ImageLoader? = null
 
     // --- Event Emitter for UI Updates ---
     /**
@@ -250,6 +256,8 @@ object CMSCureSDK {
      * This is the event name. The actual tab name used for fetching and caching colors is `__colors__`.
      */
     const val COLORS_UPDATED = "__COLORS_UPDATED__" // Event name for color updates
+
+    const val IMAGES_UPDATED = "__IMAGES_UPDATED__" // Event name for image updates
 
     // MutableSharedFlow for broadcasting content update events.
     // replay=0: New subscribers don't get old values.
@@ -320,9 +328,12 @@ object CMSCureSDK {
      * to avoid holding onto Activity or Service contexts.
      */
     fun init(context: Context) {
-        this.applicationContext = context.applicationContext // Store application context
+        this.applicationContext = context.applicationContext
         this.sharedPreferences = this.applicationContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        loadPersistedState() // Load language, tokens, cache, and tabs from disk
+        this.imageLoader = ImageLoader.Builder(context.applicationContext)
+            .respectCacheHeaders(false)
+            .build()
+        loadPersistedState()
         logDebug("SDK Initialized. Current Language: $currentLanguage. Waiting for configure() call.")
     }
 
@@ -338,12 +349,13 @@ object CMSCureSDK {
      * 4. Attempt a legacy authentication flow with the backend.
      * 5. If authentication is successful, it re-derives keys based on server-confirmed secrets,
      * establishes a Socket.IO connection for real-time updates, and performs an initial content sync.
-     * 6. Sets up a polling timer for periodic updates (if not commented out).
      *
      * @param context The application context.
      * @param projectId Your unique Project ID from the CMSCure dashboard.
      * @param apiKey Your secret API Key from the CMSCure dashboard, used for authenticating API requests.
      * @param projectSecret Your Project Secret from the CMSCure dashboard, used for initial key derivation,
+     * legacy encryption, and socket handshake. The server may confirm or provide an updated
+     * secret during authentication, which will then be used.
      * @throws IllegalArgumentException if projectId, apiKey, or projectSecret are empty.
      * @throws MalformedURLException if serverUrlString is invalid.
      * @see [init] Must be called before this method.
@@ -351,22 +363,27 @@ object CMSCureSDK {
     @RequiresApi(Build.VERSION_CODES.O) // Required for Base64 encoding used in crypto and potentially newer TLS features.
     // Also, some internal methods like sync() are marked with this due to encryption.
     fun configure(
-        context: Context, projectId: String, apiKey: String, projectSecret: String
+        context: Context, projectId: String, apiKey: String, projectSecret: String,
+        serverUrlString: String = this.serverUrlString, // Default production server URL
+        socketIOURLString: String = this.socketIOURLString  // Default production socket URL
     ) {
         // --- Input Validation ---
         if (projectId.isEmpty()) { logError("Config failed: Project ID cannot be empty."); return }
         if (apiKey.isEmpty()) { logError("Config failed: API Key cannot be empty."); return }
         if (projectSecret.isEmpty()) { logError("Config failed: Project Secret cannot be empty."); return }
 
-        val serverUrlInstance = try { URL(DEFAULT_SERVER_URL) } catch (e: MalformedURLException) {
-            logError("Config failed: Hardcoded server URL '$DEFAULT_SERVER_URL' is invalid: ${e.message}"); return
+        val serverUrl = try { URL(serverUrlString) } catch (e: MalformedURLException) {
+            logError("Config failed: Invalid server URL '$serverUrlString': ${e.message}"); return
         }
-        if (DEFAULT_SOCKET_IO_URL.isBlank() || (!DEFAULT_SOCKET_IO_URL.startsWith("ws", ignoreCase = true) && !DEFAULT_SOCKET_IO_URL.startsWith("http", ignoreCase = true))) {
-             logError("Config failed: Hardcoded socket URL '$DEFAULT_SOCKET_IO_URL' is invalid."); return
+        // Socket URL string is validated for basic non-blank. URI.create() in connectSocketIfNeeded handles full parsing.
+        if (socketIOURLString.isBlank()) {
+            logError("Config failed: Invalid socket URL (blank string)"); return
         }
-
-        this.actualServerUrl = serverUrlInstance
-        this.actualSocketIOURLString = DEFAULT_SOCKET_IO_URL
+        // Basic scheme check for socket URL for logging purposes.
+        if (!socketIOURLString.startsWith("ws://", ignoreCase = true) && !socketIOURLString.startsWith("wss://", ignoreCase = true) &&
+            !socketIOURLString.startsWith("http://", ignoreCase = true) && !socketIOURLString.startsWith("https://", ignoreCase = true)) { // Allow http/https for initial handshake if proxying
+            logWarn("Socket URL '$socketIOURLString' does not start with ws(s):// or http(s)://. Connection might fail or be insecure.")
+        }
 
         // TODO: Add build type check (e.g., !BuildConfig.DEBUG) to enforce HTTPS/WSS for production builds.
         // Example:
@@ -386,15 +403,15 @@ object CMSCureSDK {
         }
 
         logDebug("SDK Configured: Project $projectId")
-        logDebug("   - API Base URL: ${this.actualServerUrl}")
-        logDebug("   - Socket URL String: ${this.actualSocketIOURLString}")
+        logDebug("   - API Base URL: ${serverUrl.toExternalForm()}")
+        logDebug("   - Socket URL String: $socketIOURLString")
 
         // --- Setup Network Layer (Retrofit) ---
         val loggingInterceptor = HttpLoggingInterceptor { message -> if (debugLogsEnabled) Log.d("$TAG-OkHttp", message) }
             .apply { level = if (debugLogsEnabled) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE }
         val okHttpClient = OkHttpClient.Builder().addInterceptor(loggingInterceptor).build()
-        this.apiService = Retrofit.Builder().baseUrl(this.actualServerUrl).client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create(gson)) // Use pre-configured lenient Gson
+        this.apiService = Retrofit.Builder().baseUrl(serverUrl).client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build().create(ApiService::class.java)
 
         // Derive initial symmetric key from the projectSecret provided during configuration.
@@ -446,8 +463,7 @@ object CMSCureSDK {
      * and a server-confirmed `projectSecret`. The SDK then re-derives its symmetric encryption key
      * using this server-confirmed `projectSecret`.
      * It also fetches the initial list of project tabs.
-     * Upon successful authentication, it initiates the Socket.IO connection, performs an initial data sync,
-     * and starts the polling timer.
+     * Upon successful authentication, it initiates the Socket.IO connection, performs an initial data sync
      * This method is called internally after [configure] and should not be called directly by the app.
      */
     @RequiresApi(Build.VERSION_CODES.O) // For Base64 used in crypto if request/response were encrypted (not current auth)
@@ -545,23 +561,6 @@ object CMSCureSDK {
         }
     }
 
-    private fun performCacheFallbackForAvailableLanguages(completion: @Escaping (List<String>) -> Unit) {
-        val cachedLangs = synchronized(cacheLock) {
-            val currentCacheState = cache.toMap() // Create a copy for logging
-            Log.d(TAG, "GetAvailableLangs: Cache state for fallback: $currentCacheState")
-            
-            currentCacheState.values.asSequence()
-                .flatMap { screenData -> screenData.values.asSequence() }
-                .flatMap { langValueMap -> langValueMap.keys.asSequence() }
-                .distinct()
-                .filter { it != "color" } // Exclude the special key "color"
-                .toList()
-                .sorted()
-        }
-        logDebug("GetAvailableLangs: Falling back to languages inferred from cache: $cachedLangs")
-        mainThreadHandler.post { completion(cachedLangs) }
-    }
-
     /**
      * Retrieves the currently active language code being used by the SDK.
      * @return The current language code (e.g., "en"). Defaults to "en" if not set.
@@ -578,11 +577,7 @@ object CMSCureSDK {
      */
     fun availableLanguages(completion: @Escaping (List<String>) -> Unit) {
         val config = getCurrentConfiguration() ?: run { logError("GetLangs: SDK not configured."); mainThreadHandler.post { completion(emptyList()) }; return }
-        if (authToken == null) { // authToken is set after successful performLegacyAuthenticationAndConnect
-            logWarn("GetAvailableLangs: Not authenticated yet. Falling back to cache for available languages.")
-            performCacheFallbackForAvailableLanguages(completion) // Call the existing helper
-            return
-        }
+        if (authToken == null) { logError("GetLangs: Not authenticated. Cannot fetch languages."); mainThreadHandler.post { completion(emptyList()) }; return }
 
         coroutineScope.launch {
             try {
@@ -684,15 +679,16 @@ object CMSCureSDK {
      * ```
      * Remember to re-fetch and update your UI when [contentUpdateFlow] signals changes.
      */
+    /** Retrieves a URL for an image stored as a value within a translations tab. */
     fun imageUrl(forKey: String, inTab: String): URL? {
-        val urlString = translation(forKey, inTab) // translation() is thread-safe
-        return try {
-            if (urlString.isNotBlank()) URL(urlString) else null
-        } catch (e: MalformedURLException) {
-            logError("Invalid URL format for image key '$forKey' in tab '$inTab': $urlString"); null
-        } catch (e: Exception) { // Catch any other URL parsing related exceptions
-            logError("Error creating URL for image key '$forKey' in tab '$inTab': ${e.message}"); null
-        }
+        val urlString = translation(forKey, inTab)
+        return try { if (urlString.isNotBlank()) URL(urlString) else null } catch (e: Exception) { null }
+    }
+
+    /** Retrieves a URL for a globally managed image asset. */
+    fun imageURL(forKey: String): URL? {
+        val urlString = synchronized(cacheLock) { cache["__images__"]?.get(forKey)?.get("url") }
+        return try { if (urlString?.isNotBlank() == true) URL(urlString) else null } catch (e: Exception) { null }
     }
 
     /**
@@ -713,6 +709,39 @@ object CMSCureSDK {
      */
     @RequiresApi(Build.VERSION_CODES.O) // Required for encryption operations
     fun sync(screenName: String, completion: ((Boolean) -> Unit)? = null) {
+        when (screenName) {
+            IMAGES_UPDATED -> syncImages(completion)
+            else -> syncTranslations(screenName, completion)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun syncImages(completion: ((Boolean) -> Unit)? = null) {
+        val config = getCurrentConfiguration() ?: run { completion?.invoke(false); return }
+        logDebug("🔄 Syncing global image assets...")
+        coroutineScope.launch {
+            var success = false
+            try {
+                val imageAssets = apiService?.getImages(config.projectId, config.apiKey)
+                if (imageAssets != null) {
+                    logDebug("✅ Fetched ${imageAssets.size} image assets from server.")
+                    synchronized(cacheLock) {
+                        val newImageCache: MutableMap<String, MutableMap<String, String>> = mutableMapOf()
+                        imageAssets.forEach { asset -> newImageCache[asset.key] = mutableMapOf("url" to asset.url) }
+                        cache["__images__"] = newImageCache
+                    }
+                    persistCacheToDisk()
+                    prefetchImages(imageAssets.mapNotNull { it.url })
+                    success = true
+                    _contentUpdateFlow.tryEmit(IMAGES_UPDATED)
+                }
+            } catch (e: Exception) { logError("🆘 Sync images exception: ${e.message}") }
+            mainThreadHandler.post { completion?.invoke(success) }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun syncTranslations(screenName: String, completion: ((Boolean) -> Unit)? = null) {
         // Internally, the colors tab is always referred to as "__colors__".
         // If COLORS_UPDATED event name is passed, map it to the actual tab name for API calls and caching.
         val effectiveScreenName = if (screenName == COLORS_UPDATED) "__colors__" else screenName
@@ -769,34 +798,28 @@ object CMSCureSDK {
     /**
      * Triggers a synchronization for all known project tabs and the special `__colors__` tab.
      * This is typically called on app start (after configuration and authentication),
-     * after a language change, or by the polling timer and socket events to ensure all
+     * after a language change, or by the socket events to ensure all
      * relevant content is up-to-date.
      * Emits [ALL_SCREENS_UPDATED] to [contentUpdateFlow] after attempting to sync all tabs.
      */
     @RequiresApi(Build.VERSION_CODES.O) // Required due to calling sync()
     private fun syncIfOutdated() {
-        logDebug("Performing syncIfOutdated for all relevant tabs.")
-        // Get a consistent snapshot of tabs to sync to avoid issues if modified during iteration
-        val tabsToSyncSnapshot = synchronized(cacheLock) { knownProjectTabs.toList() }.distinct()
+        val tabsToSync = synchronized(cacheLock) { knownProjectTabs.toList() }.distinct()
+        val specialContent = listOf(COLORS_UPDATED, IMAGES_UPDATED)
+        (tabsToSync + specialContent).forEach { sync(it) }
+        coroutineScope.launch { _contentUpdateFlow.tryEmit(ALL_SCREENS_UPDATED) }
+    }
 
-        if (tabsToSyncSnapshot.isEmpty()) {
-            // If no user-defined tabs are known (e.g., fresh install or after cache clear),
-            // attempt to sync a default content tab (e.g., "general") and always sync colors.
-            logDebug("syncIfOutdated: No user-defined tabs known yet. Syncing default 'general' and using constant for colors tab.")
-            sync("general") // Attempt to sync a common default content tab
-            sync(COLORS_UPDATED) // Use the constant to correctly sync the "__colors__" tab
-        } else {
-            tabsToSyncSnapshot.forEach { sync(it) } // Sync all known user tabs
-            sync(COLORS_UPDATED) // Always ensure colors are also synced using the constant
-        }
-        // After all individual sync operations have been initiated (they will emit their own events),
-        // also emit a general "all screens updated" event. This can be useful for UIs
-        // that need a global refresh signal rather than observing individual tab updates.
-        coroutineScope.launch {
-            logDebug("syncIfOutdated: Emitting ALL_SCREENS_UPDATED.")
-            _contentUpdateFlow.tryEmit(ALL_SCREENS_UPDATED)
+    private fun prefetchImages(urls: List<String>) {
+        val loader = imageLoader ?: return
+        if (urls.isEmpty()) return
+        logDebug("🖼️ Coil: Starting pre-fetch for ${urls.size} images.")
+        urls.forEach { url ->
+            val request = ImageRequest.Builder(applicationContext!!).data(url).build()
+            loader.enqueue(request)
         }
     }
+
 
     /**
      * Establishes or re-establishes the Socket.IO connection if not already connected and acknowledged.
@@ -806,8 +829,6 @@ object CMSCureSDK {
     @RequiresApi(Build.VERSION_CODES.O) // Required for sendSocketHandshake() due to encryption
     fun connectSocketIfNeeded() {
         val config = getCurrentConfiguration() ?: run { logError("SocketConnect: SDK not configured."); return }
-        val currentSocketUrlString = this.actualSocketIOURLString ?: run { logError("SocketConnect: Socket URL not set (config error)."); return }
-
 
         // Check current socket state to avoid redundant operations
         if (socket?.connected() == true && handshakeAcknowledged) {
@@ -831,13 +852,13 @@ object CMSCureSDK {
                     forceNew = true // Ensures a new connection attempt, not reusing a potentially stale one
                     reconnection = true // Enable automatic reconnections
                     path = "/socket.io/" // Standard Socket.IO connection path
-                    // Force WebSocket transport, similar to Swift SDK, to avoid potential issues with HTTP long-polling.
+                    // Force WebSocket transport
                     transports = arrayOf(io.socket.engineio.client.transports.WebSocket.NAME)
                     // TODO: For WSS with self-signed certificates in a development environment,
                     // you might need to configure a custom SSLContext for OkHttp and pass it to Socket.IO options.
                     // For production with valid certificates, this is usually not needed.
                 }
-                val socketUri = URI.create(currentSocketUrlString) // Use the configured socket URL string
+                val socketUri = URI.create(this.socketIOURLString) // Use the configured socket URL string
                 logDebug("🔌 Attempting to connect socket to: $socketUri (path ${opts.path})")
                 socket = IO.socket(socketUri, opts) // Create new Socket.IO client instance
                 setupSocketHandlers() // Register event listeners for the new socket instance
@@ -845,69 +866,6 @@ object CMSCureSDK {
             } catch (e: Exception) { // Catch errors during URI parsing or IO.socket() creation
                 logError("Socket connection setup exception: ${e.message}"); e.printStackTrace()
             }
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    fun getKnownProjectTabsArray(): List<String> {
-        synchronized(cacheLock) {
-            return knownProjectTabs.toList().sorted() // Return a copy, sorted for consistency
-        }
-    }
-
-    /**
-    * Clears all persisted SDK data including the content cache, known tabs list,
-    * authentication tokens, and language preferences. Resets in-memory caches as well.
-    * The SDK may require re-configuration after calling this method.
-    * Emits [ALL_SCREENS_UPDATED] to [contentUpdateFlow] to signal a general refresh.
-    */
-    @RequiresApi(Build.VERSION_CODES.O)
-    fun clearCache() {
-        logDebug("Clearing all SDK data...")
-
-        // Reset in-memory authentication and configuration related state
-        synchronized(configLock) { // If these are protected by configLock, or a more general lock
-            authToken = null
-            apiSecret = null // This was used to derive symmetricKey
-            symmetricKey = null
-            handshakeAcknowledged = false
-            // configuration variable itself is usually kept unless re-configure is always mandatory
-            // If you want to force re-configuration, you can set:
-            // configuration = null
-        }
-
-        // Reset in-memory cache and tabs
-        synchronized(cacheLock) {
-            cache.clear()
-            knownProjectTabs.clear()
-        }
-
-        // Clear SharedPreferences
-        // Use commit() for certainty if an immediate clear is desired before next operations.
-        sharedPreferences?.edit()?.clear()?.commit()
-
-        // Delete cache files from internal storage
-        applicationContext?.let { ctx ->
-            try {
-                val cacheFile = File(ctx.filesDir, CACHE_FILE_NAME)
-                if (cacheFile.exists()) {
-                    cacheFile.delete()
-                    logDebug("Deleted cache file: $CACHE_FILE_NAME")
-                }
-                val tabsFile = File(ctx.filesDir, TABS_FILE_NAME)
-                if (tabsFile.exists()) {
-                    tabsFile.delete()
-                    logDebug("Deleted tabs file: $TABS_FILE_NAME")
-                }
-            } catch (e: Exception) {
-                logError("Error deleting cache/tabs files: ${e.message}")
-            }
-        }
-
-        logDebug("All SDK data (SharedPreferences, cache files, in-memory state) cleared.")
-        // It's good to notify listeners that everything has changed or been wiped.
-        coroutineScope.launch {
-            _contentUpdateFlow.tryEmit(ALL_SCREENS_UPDATED)
         }
     }
 
@@ -1110,7 +1068,6 @@ object CMSCureSDK {
             } catch (e: Exception) { logError("Failed to persist content cache to disk: ${e.message}") }
         }
     }
-    
 
     /** Loads the content cache from a local JSON file into the in-memory [cache]. This operation is thread-safe. */
     private fun loadCacheFromDisk() {
@@ -1204,7 +1161,6 @@ object CMSCureSDK {
     // --- TODOs / Future Enhancements ---
     // - Implement public `clearAllData()` method to wipe all persisted SDK data (SharedPreferences, files).
     // - App lifecycle observers (e.g., using ProcessLifecycleOwner) to:
-    //   - Pause/resume the polling timer automatically when the app backgrounds/foregrounds.
     //   - Disconnect/reconnect the socket more intelligently based on app visibility.
     // - More granular error reporting to the consuming application (e.g., via a dedicated error SharedFlow or through callbacks in relevant methods).
     // - For more direct Jetpack Compose integration, consider exposing content values

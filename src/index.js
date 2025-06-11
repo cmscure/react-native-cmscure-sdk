@@ -1,159 +1,215 @@
-import { NativeModules, Platform, NativeEventEmitter } from 'react-native';
+import { NativeModules, NativeEventEmitter, Image } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
 
-const LINKING_ERROR =
-  `The package 'react-native-cmscure-sdk' doesn't seem to be linked. Make sure: \n\n` +
-  Platform.select({ ios: "- You have run 'pod install' in the 'ios' directory\n", default: '' }) +
-  '- You rebuilt the app after installing the package\n' +
-  '- You are not using Expo Go\n';
+const { CMSCureSDKModule } = NativeModules;
 
-const CMSCureSDKNative = NativeModules.CMSCureSDK
-  ? NativeModules.CMSCureSDK
-  : new Proxy(
-      {},
-      {
-        get() {
-          throw new Error(LINKING_ERROR);
-        },
-      }
-    );
-
-let eventEmitterInstance;
-if (NativeModules.CMSCureSDK) {
-  eventEmitterInstance = new NativeEventEmitter(CMSCureSDKNative);
-} else {
-  console.warn("CMSCureSDK: Native module not found, event emitter will not be functional. Ensure the library is linked correctly.");
+if (!CMSCureSDKModule) {
+  throw new Error("CMSCureSDK: Native module is not available. Please check your installation.");
 }
 
-const CMSCureSDK = {
-  /**
-   * Configures the CMSCureSDK with necessary project credentials.
-   * Server and Socket URLs are hardcoded within the SDK.
-   * This method MUST be called once, typically early in your application's lifecycle.
-   *
-   * @param {object} options - The configuration options.
-   * @param {string} options.projectId - Your unique Project ID from the CMSCure dashboard.
-   * @param {string} options.apiKey - Your secret API Key from the CMSCure dashboard.
-   * @param {string} options.projectSecret - Your Project Secret from the CMSCure dashboard.
-   * @returns {Promise<void | string>} A promise that resolves if configuration is successful, or rejects with an error. May resolve with a warning string on older Android versions.
-   */
-  configure: (options) => {
-    if (!options || typeof options !== 'object') {
-      return Promise.reject(new Error("CMSCureSDK: Configuration options object is required."));
-    }
-    const requiredKeys = ['projectId', 'apiKey', 'projectSecret'];
-    for (const key of requiredKeys) {
-      if (!options[key] || typeof options[key] !== 'string' || options[key].trim() === '') {
-        return Promise.reject(new Error(`CMSCureSDK: '${key}' is required and must be a non-empty string.`));
-      }
-    }
-    // Remove pollingIntervalSeconds if it exists, as it's no longer used
-    const { pollingIntervalSeconds, ...nativeOptions } = options;
-    if (pollingIntervalSeconds !== undefined) {
-        console.warn("CMSCureSDK: 'pollingIntervalSeconds' is deprecated and no longer used. Updates are real-time via WebSockets.");
-    }
+const eventEmitter = new NativeEventEmitter(CMSCureSDKModule);
 
-    // Server and Socket URLs are now hardcoded in the native modules.
-    // Only pass essential credentials.
-    return CMSCureSDKNative.configure(nativeOptions);
-  },
-
-  setLanguage: (languageCode, force = false) => {
-    if (typeof languageCode !== 'string' || languageCode.trim() === '') {
-        return Promise.reject(new Error("CMSCureSDK: 'languageCode' must be a non-empty string."));
-    }
-    return CMSCureSDKNative.setLanguage(languageCode, force);
-  },
-
-  getLanguage: () => {
-    return CMSCureSDKNative.getLanguage();
-  },
-
-  getAvailableLanguages: () => {
-    return CMSCureSDKNative.getAvailableLanguages();
-  },
-
-  startListening: () => {
-    return CMSCureSDKNative.startListening();
-  },
-
-  translation: (key, tab) => {
-    if (typeof key !== 'string' || key.trim() === '' || typeof tab !== 'string' || tab.trim() === '') {
-        return Promise.reject(new Error("CMSCureSDK: 'key' and 'tab' must be non-empty strings for translation."));
-    }
-    return CMSCureSDKNative.translation(key, tab);
-  },
-
-  colorValue: (key) => {
-    if (typeof key !== 'string' || key.trim() === '') {
-        return Promise.reject(new Error("CMSCureSDK: 'key' must be a non-empty string for colorValue."));
-    }
-    return CMSCureSDKNative.colorValue(key);
-  },
-
-  imageUrl: (key, tab) => {
-     if (typeof key !== 'string' || key.trim() === '' || typeof tab !== 'string' || tab.trim() === '') {
-        return Promise.reject(new Error("CMSCureSDK: 'key' and 'tab' must be non-empty strings for imageUrl."));
-    }
-    return CMSCureSDKNative.imageUrl(key, tab);
-  },
-
-  sync: (screenName) => {
-    if (typeof screenName !== 'string' || screenName.trim() === '') {
-        return Promise.reject(new Error("CMSCureSDK: 'screenName' must be a non-empty string for sync."));
-    }
-    return CMSCureSDKNative.sync(screenName);
-  },
-
-  isConnected: () => {
-    return CMSCureSDKNative.isConnected();
-  },
-
-  setDebugLogsEnabled: (enabled) => {
-    if (typeof enabled !== 'boolean') {
-      return Promise.reject(new Error("CMSCureSDK: 'enabled' must be a boolean for setDebugLogsEnabled."));
-    }
-    return CMSCureSDKNative.setDebugLogsEnabled(enabled);
-  },
-
-  clearCache: () => {
-    return CMSCureSDKNative.clearCache();
-  },
-
-  syncAllTabs: async () => {
-    try {
-      const tabs = await CMSCureSDKNative.getKnownTabs?.();
-      if (Array.isArray(tabs)) {
-        await Promise.all(tabs.map((tab) => CMSCureSDK.sync(tab)));
-      } else {
-        console.warn("CMSCureSDK: getKnownTabs() returned invalid data or is not available.");
-      }
-    } catch (err) {
-      console.warn("CMSCureSDK: Failed to dynamically sync all tabs:", err);
-    }
-  },
-
-  addContentUpdateListener: (listenerCallback) => {
-    if (!eventEmitterInstance) {
-        console.warn("CMSCureSDK: NativeEventEmitter not initialized. Cannot add listener.");
-        return undefined;
-    }
-    return eventEmitterInstance.addListener('CMSCureContentUpdated', listenerCallback);
-  },
-
-  removeContentUpdateListener: (subscription) => {
-    if (subscription && typeof subscription.remove === 'function') {
-      subscription.remove();
-    }
-  },
-
-  removeAllContentUpdateListeners: () => {
-    if (eventEmitterInstance && typeof eventEmitterInstance.removeAllListeners === 'function') {
-      eventEmitterInstance.removeAllListeners('CMSCureContentUpdated');
-      console.log("CMSCureSDK: All listeners for 'CMSCureContentUpdated' have been removed.");
-    } else {
-      console.warn("CMSCureSDK: NativeEventEmitter not initialized. Cannot remove all listeners.");
-    }
-  },
+const Constants = {
+  COLORS_UPDATED: '__COLORS_UPDATED__',
+  IMAGES_UPDATED: '__IMAGES_UPDATED__',
+  ALL_SCREENS_UPDATED: '__ALL_SCREENS_UPDATED__',
 };
 
-export default CMSCureSDK;
+/**
+ * Main API for interacting with the CMSCure SDK.
+ */
+export const Cure = {
+  /**
+   * Configures the SDK with your project credentials. Must be called once on app startup.
+   * @param {object} config - The configuration object.
+   * @param {string} config.projectId - Your project's ID.
+   * @param {string} config.apiKey - Your project's API key.
+   * @param {string} config.projectSecret - Your project's secret key.
+   * @returns {Promise<string>} A promise that resolves on successful initiation.
+   */
+  configure: ({ projectId, apiKey, projectSecret }) => {
+    return CMSCureSDKModule.configure(projectId, apiKey, projectSecret);
+  },
+
+  /**
+   * Sets the active language for translations.
+   * @param {string} languageCode - The language code (e.g., 'en', 'fr').
+   * @returns {Promise<string>}
+   */
+  setLanguage: (languageCode) => {
+    return CMSCureSDKModule.setLanguage(languageCode);
+  },
+
+  /**
+   * Gets the currently active language code.
+   * @returns {Promise<string>}
+   */
+  getLanguage: () => {
+    return CMSCureSDKModule.getLanguage();
+  },
+
+  /**
+   * Fetches the list of available languages for the project.
+   * @returns {Promise<string[]>}
+   */
+  availableLanguages: () => {
+    return CMSCureSDKModule.availableLanguages();
+  },
+
+  /**
+   * Manually triggers a sync for a specific screen/tab.
+   * @param {string} screenName - The name of the screen to sync.
+   * @returns {Promise<boolean>}
+   */
+  sync: (screenName) => {
+    return CMSCureSDKModule.sync(screenName);
+  },
+  
+  /** Constants for special update events. */
+  Events: Constants,
+};
+
+// --- REACT HOOKS ---
+
+/**
+ * A hook that provides a live translation string from the CMS.
+ * It automatically updates when the language changes or real-time updates are received.
+ * @param {string} key - The translation key.
+ * @param {string} tab - The tab/screen name where the key is located.
+ * @returns {string} The translated string.
+ */
+export const useCureTranslation = (key, tab) => {
+  const [value, setValue] = useState('');
+
+  const updateValue = async () => {
+    const newValue = await CMSCureSDKModule.translation(key, tab);
+    setValue(newValue);
+  };
+
+  useEffect(() => {
+    updateValue(); // Initial fetch
+
+    const subscription = eventEmitter.addListener('onContentUpdated', (updatedIdentifier) => {
+      // Re-fetch if the relevant tab was updated, or if all tabs were updated
+      if (updatedIdentifier === tab || updatedIdentifier === Constants.ALL_SCREENS_UPDATED) {
+        updateValue();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [key, tab]);
+
+  return value;
+};
+
+/**
+ * A hook that provides a live color hex string from the CMS.
+ * @param {string} key - The global color key.
+ * @returns {string | null} The color hex string (e.g., '#RRGGBB') or null.
+ */
+export const useCureColor = (key) => {
+  const [value, setValue] = useState(null);
+
+  const updateValue = async () => {
+    const newValue = await CMSCureSDKModule.colorValue(key);
+    setValue(newValue);
+  };
+
+  useEffect(() => {
+    updateValue();
+
+    const subscription = eventEmitter.addListener('onContentUpdated', (updatedIdentifier) => {
+      if (updatedIdentifier === Constants.COLORS_UPDATED || updatedIdentifier === Constants.ALL_SCREENS_UPDATED) {
+        updateValue();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [key]);
+
+  return value;
+};
+
+/**
+ * A hook that provides a live, screen-dependent image URL from the CMS.
+ * @param {string} key - The key for the image URL.
+ * @param {string} tab - The tab/screen name where the key is located.
+ * @returns {string | null} The image URL string or null.
+ */
+export const useCureImageUrl = (key, tab) => {
+    const [value, setValue] = useState(null);
+
+    const updateValue = async () => {
+        const newValue = await CMSCureSDKModule.imageUrl(key, tab);
+        setValue(newValue);
+    };
+
+    useEffect(() => {
+        updateValue();
+        const subscription = eventEmitter.addListener('onContentUpdated', (updatedIdentifier) => {
+            if (updatedIdentifier === tab || updatedIdentifier === Constants.ALL_SCREENS_UPDATED) {
+                updateValue();
+            }
+        });
+        return () => subscription.remove();
+    }, [key, tab]);
+
+    return value;
+};
+
+/**
+ * A hook that provides a live, global image asset URL from the CMS.
+ * @param {string} assetKey - The key for the global image asset.
+ * @returns {string | null} The image URL string or null.
+ */
+export const useCureImageURL = (assetKey) => {
+    const [value, setValue] = useState(null);
+
+    const updateValue = async () => {
+        const newValue = await CMSCureSDKModule.imageURL(assetKey);
+        setValue(newValue);
+    };
+
+    useEffect(() => {
+        updateValue();
+        const subscription = eventEmitter.addListener('onContentUpdated', (updatedIdentifier) => {
+            if (updatedIdentifier === Constants.IMAGES_UPDATED || updatedIdentifier === Constants.ALL_SCREENS_UPDATED) {
+                updateValue();
+            }
+        });
+        return () => subscription.remove();
+    }, [assetKey]);
+
+    return value;
+};
+
+
+// --- REACT COMPONENTS ---
+
+/**
+ * A ready-to-use, cache-enabled component for displaying images from CMSCure.
+ * It leverages the native caching capabilities provided by Kingfisher (iOS) and Coil (Android).
+ *
+ * @param {object} props - The component props.
+ * @param {string | null} props.url - The image URL, typically from `useCureImageURL`.
+ * @param {object} [props.style] - Style for the image component.
+ * @param {string} [props.resizeMode] - The resize mode for the image.
+ * @param {React.ReactNode} [props.placeholder] - A component to show while the image is loading.
+ * @returns {React.Component}
+ */
+export const SDKImage = ({ url, style, resizeMode = 'cover', placeholder = null, ...props }) => {
+  const source = useMemo(() => (url ? { uri: url } : null), [url]);
+
+  if (!source) {
+    return placeholder;
+  }
+
+  return (
+    <Image
+      source={source}
+      style={style}
+      resizeMode={resizeMode}
+      {...props}
+    />
+  );
+};
