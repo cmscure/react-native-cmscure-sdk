@@ -1,6 +1,6 @@
 {
   "name": "@cmscure/react-native-cmscure-sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "React Native SDK for integrating with the CMSCure platform, providing dynamic content, translations, and real-time updates via WebSockets.",
   "main": "src/index.js",
   "types": "index.d.ts",
