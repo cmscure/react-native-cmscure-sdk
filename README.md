@@ -3,7 +3,7 @@
 The official React Native SDK for CMSCure. Integrate a powerful, real-time, and multi-language CMS into your React Native application with ease.
 
 [![NPM Version](https://img.shields.io/npm/v/@cmscure/react-native-cmscure-sdk.svg)](https://www.npmjs.com/package/react-native-cmscure-sdk)
-[![License](https://img.shields.io/npm/l/react-native-cmscure-sdk.svg)](https://github.com/your-repo/react-native-cmscure-sdk/blob/main/LICENSE)
+[![License](https://img.shields.io/npm/l/@cmscure/react-native-cmscure-sdk.svg)](https://github.com/cmscure/react-native-cmscure-sdk/blob/main/LICENSE)
 
 ## Features
 
@@ -25,9 +25,9 @@ The official React Native SDK for CMSCure. Integrate a powerful, real-time, and 
 ### Step 1: Add the Package
 
 ```bash
-npm install react-native-cmscure-sdk
+npm install @cmscure/react-native-cmscure-sdk
 # --- or ---
-yarn add react-native-cmscure-sdk
+yarn add @cmscure/react-native-cmscure-sdk
 ```
 You may also need the following peer dependencies for more complex UIs:
 ```bash
@@ -114,7 +114,7 @@ The library should be auto-linked. No further steps are usually required.
 In your app's entry point file (e.g., `App.js` or `index.js`), import and configure the SDK. This should only be done once.
 
 ```javascript
-import { Cure } from 'react-native-cmscure-sdk';
+import { Cure } from '@cmscure/react-native-cmscure-sdk';
 
 Cure.configure({
   projectId: 'YOUR_PROJECT_ID',
@@ -132,7 +132,7 @@ The best way to use the SDK is with the provided React Hooks. They make your UI 
 Fetches a string and updates it automatically.
 
 ```javascript
-import { useCureTranslation } from 'react-native-cmscure-sdk';
+import { useCureTranslation } from '@cmscure/react-native-cmscure-sdk';
 import { Text } from 'react-native';
 
 const WelcomeMessage = () => {
@@ -146,7 +146,7 @@ const WelcomeMessage = () => {
 Fetches a color hex string and updates automatically.
 
 ```javascript
-import { useCureColor } from 'react-native-cmscure-sdk';
+import { useCureColor } from '@cmscure/react-native-cmscure-sdk';
 import { View } from 'react-native';
 
 const ThemedView = ({ children }) => {
@@ -160,7 +160,7 @@ const ThemedView = ({ children }) => {
 Fetch a global image URL and display it using the cache-enabled `SDKImage` component.
 
 ```javascript
-import { useCureImageURL, SDKImage } from 'react-native-cmscure-sdk';
+import { useCureImageURL, SDKImage } from '@cmscure/react-native-cmscure-sdk';
 import { View, StyleSheet } from 'react-native';
 
 const Logo = () => {
@@ -179,7 +179,7 @@ const Logo = () => {
 Change the app's language at any time. All `useCure...` hooks will automatically update to reflect the new language.
 
 ```javascript
-import { Cure } from 'react-native-cmscure-sdk';
+import { Cure } from '@cmscure/react-native-cmscure-sdk';
 import { Button } from 'react-native';
 
 const LanguageSwitcher = () => {
