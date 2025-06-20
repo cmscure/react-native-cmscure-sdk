@@ -1,83 +1,95 @@
-// This file is part of the CMSCure SDK for React Native.
-// It is used to configure the Android build settings for the CMSCure SDK module.   
 buildscript {
+    ext.kotlin_version = '1.9.23'
+    
     repositories {
-        mavenCentral()
         google()
+        mavenCentral()
+    }
+    
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
 
-plugins {
-  id 'com.android.library'
-  id 'org.jetbrains.kotlin.android'        // <— make sure this is here
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+def getExtOrDefault(name, defaultValue) {
+    return rootProject.ext.has(name) ? rootProject.ext.get(name) : defaultValue
 }
 
 android {
-    // Use compileSdkVersion and buildToolsVersion from the root project
     namespace "com.reactnativecmscuresdk"
-    compileSdkVersion 35
-    buildToolsVersion rootProject.ext.buildToolsVersion
-
+    
+    compileSdkVersion getExtOrDefault('compileSdkVersion', 34)
+    
     defaultConfig {
-     minSdk 24
-     targetSdk 35
-   }
-
-    buildFeatures {
-        compose true
+        minSdkVersion getExtOrDefault('minSdkVersion', 21)
+        targetSdkVersion getExtOrDefault('targetSdkVersion', 34)
+        versionCode 1
+        versionName "1.0"
     }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.5.15'
-    }
-
+    
     buildTypes {
         release {
             minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-
-    lintOptions {
-        abortOnError false
-    }
-
+    
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    
     kotlinOptions {
         jvmTarget = "17"
     }
+    
+    buildFeatures {
+        compose true
+    }
+    
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.11"
+    }
 }
 
-
+repositories {
+    google()
+    mavenCentral()
+}
 
 dependencies {
-    implementation 'com.facebook.react:react-native:+' 
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$rootProject.ext.kotlinVersion" // Use jdk8 variant
-
-    // Dependencies for your CMSCureSDK.kt
-    implementation 'com.google.code.gson:gson:2.8.8' // Or a newer compatible version
-    implementation 'com.squareup.okhttp3:okhttp:4.9.3' // Or a newer compatible version
-    implementation 'com.squareup.okhttp3:logging-interceptor:4.9.3' // Match okhttp version
+    // React Native
+    implementation 'com.facebook.react:react-native:+'
+    
+    // Kotlin
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    
+    // CMSCure SDK dependencies
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    
+    // Compose (required by CMSCure SDK)
+    implementation platform('androidx.compose:compose-bom:2024.02.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.runtime:runtime'
+    implementation 'androidx.compose.material3:material3'
+    
+    // Networking
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
     implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
-    implementation 'io.socket:socket.io-client:2.0.1' // Or the version your SDK uses
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4' // Or a newer compatible version
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4' // Match coroutines-core
-    // implementation 'io.coil-kt:coil:2.5.0' 
-    implementation 'com.facebook.react:react-native:+'
-   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.23"
-   def composeBom = platform("androidx.compose:compose-bom:2024.02.00")
-   implementation composeBom
-   implementation "androidx.compose.ui:ui"
-   implementation "androidx.compose.runtime:runtime"
-   implementation "androidx.compose.material3:material3"
-   implementation "androidx.compose.ui:ui-graphics"
-    implementation "androidx.compose.compiler:compiler:1.5.15"
-    // implementation("io.coil-kt.coil3:coil-compose:3.2.0")
-implementation("io.coil-kt:coil-compose:2.2.2")
-
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.12.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    
+    // Socket.IO
+    implementation('io.socket:socket.io-client:2.1.0') {
+        exclude group: 'org.json', module: 'json'
+    }
+    
+    // Image loading (Coil)
+    implementation 'io.coil-kt:coil-compose:2.5.0'
 }

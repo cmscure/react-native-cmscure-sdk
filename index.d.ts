@@ -1,19 +1,13 @@
-// index.d.ts
-
-import React from 'react';
+import { ReactNode, ComponentProps } from 'react';
 import { ImageProps } from 'react-native';
 
-// --- Data Structures ---
-
-/** Represents a single item from a CMSCure Data Store. */
-export interface DataStoreItem {
-  id: string;
-  data: { [key: string]: JSONValue };
-  createdAt: string;
-  updatedAt: string;
+// Core types
+export interface CMSCureConfig {
+  projectId: string;
+  apiKey: string;
+  projectSecret?: string; // Only required for iOS
 }
 
-/** Represents a dynamic value from a Data Store item's data. */
 export interface JSONValue {
   stringValue?: string;
   intValue?: number;
@@ -22,100 +16,76 @@ export interface JSONValue {
   localizedString?: string;
 }
 
-// --- Configuration ---
-
-export interface CMSCureConfig {
-  projectId: string;
-  apiKey: string;
-  projectSecret: string;
+export interface DataStoreItem {
+  id: string;
+  data: Record<string, JSONValue>;
+  createdAt: string;
+  updatedAt: string;
 }
 
-// --- Hooks API (Recommended) ---
+export interface DataStoreResult {
+  items: DataStoreItem[];
+  isLoading: boolean;
+}
 
-/**
- * Provides the CMSCure context to its children. Must be at the root of your app.
- */
-export const CMSCureProvider: React.FC<{ children: React.ReactNode }>;
+// Main SDK API
+export interface CureAPI {
+  configure(config: CMSCureConfig): Promise<boolean>;
+  setLanguage(languageCode: string): Promise<boolean>;
+  getLanguage(): Promise<string>;
+  availableLanguages(): Promise<string[]>;
+  translation(key: string, tab: string): Promise<string>;
+  colorValue(key: string): Promise<string | null>;
+  imageURL(key: string): Promise<string | null>;
+  getStoreItems(apiIdentifier: string): Promise<DataStoreItem[]>;
+  syncStore(apiIdentifier: string): Promise<boolean>;
+  sync(screenName: string): Promise<boolean>;
+}
 
-/**
- * A hook that provides a live translation string from the CMS.
- * @param key The translation key.
- * @param tab The tab/screen name where the key is located.
- * @param fallback The default string to display while loading or if the key is not found.
- * @returns The translated string.
- */
-export function useCureString(key: string, tab: string, fallback?: string): string;
+export const Cure: CureAPI;
 
-/**
- * A hook that provides a live color hex string from the CMS.
- * @param key The global color key.
- * @param fallback The default color hex string (e.g., '#FFFFFF').
- * @returns The color hex string.
- */
-export function useCureColor(key: string, fallback?: string): string;
+// Provider component
+export interface CMSCureProviderProps {
+  children: ReactNode;
+  config?: CMSCureConfig;
+}
 
-/**
- * A hook that provides a live image URL from the CMS.
- * @param key The key for the image asset.
- * @param tab Optional tab/screen name for screen-dependent images. If omitted, fetches from global assets.
- * @returns The image URL string, or null if not found.
- */
-export function useCureImage(key: string, tab?: string): string | null;
+export function CMSCureProvider(props: CMSCureProviderProps): JSX.Element;
 
-/**
- * A hook that provides a live, auto-updating list of items from a Data Store.
- * @param apiIdentifier The unique API identifier of the Data Store.
- * @returns An object containing the array of items and a loading state.
- */
-export function useCureDataStore(apiIdentifier: string): { items: DataStoreItem[]; isLoading: boolean };
+// Hooks
+export function useCureString(
+  key: string, 
+  tab: string, 
+  defaultValue?: string
+): string;
 
-// --- Component API ---
+export function useCureColor(
+  key: string, 
+  defaultValue?: string
+): string;
 
-interface CureSDKImageProps extends ImageProps {
+export function useCureImage(
+  key: string, 
+  tab?: string | null
+): string | null;
+
+export function useCureDataStore(
+  apiIdentifier: string
+): DataStoreResult;
+
+// Components
+export interface CureSDKImageProps extends Omit<ImageProps, 'source'> {
   url: string | null;
 }
 
-/** A cache-enabled component for displaying images from CMSCure. */
-export const CureSDKImage: React.FC<CureSDKImageProps>;
+export function CureSDKImage(props: CureSDKImageProps): JSX.Element | null;
 
-// --- Manual API (for advanced use cases) ---
-
-export const Cure: {
-  /**
-   * Configures the SDK. Automatically called by the provider.
-   */
-  configure: (config: CMSCureConfig) => void;
-  configure: (config: CMSCureConfig) => Promise;
-
-  /**
-   * Sets the active language and triggers a content refresh.
-   */
-  setLanguage: (languageCode: string) => Promise<void>;
-
-  /**
-   * Gets the currently active language code.
-   */
-  getLanguage: () => Promise<string>;
-
-  /**
-   * Fetches the list of available language codes for the project.
-   */
-  availableLanguages: () => Promise<string[]>;
-
-  /**
-   * Manually triggers a sync for a specific Data Store.
-   */
-  syncStore: (apiIdentifier: string) => Promise<boolean>;
-
-  
-  sync: (screenName: string) => Promise<void>;
-
-  /**
-   * Fetches a single item from a Data Store by its ID.
-   */
-  getStoreItems: (apiIdentifier: string) => Promise<DataStoreItem[]>;
-  translation: (key: string, tab: string) => Promise<string>;
-  colorValue: (key: string) => Promise<string>;
-  imageUrl: (key: string, tab: string) => Promise<string>;
-  imageURL: (key: string) => Promise<string>;
+// Constants that might be useful
+export const CMSCureConstants: {
+  ALL_SCREENS_UPDATED: string;
+  COLORS_UPDATED: string;
+  IMAGES_UPDATED: string;
 };
+
+// Re-export everything as default
+export default Cure;
