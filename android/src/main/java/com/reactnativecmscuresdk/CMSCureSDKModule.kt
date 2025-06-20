@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.delay
+
 
 class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
@@ -21,13 +23,30 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
 
     private fun listenForContentUpdates() {
         scope.launch {
-            CMSCureSDK.contentUpdateFlow.collect {
-                // The new SDK emits a UUID. We just need to signal a generic update.
-                // We'll let the JS layer re-fetch what it needs.
-                sendEvent(mapOf("type" to "fullSync"))
+            CMSCureSDK.contentUpdateFlow.collect { identifier ->
+                when (identifier) {
+                    CMSCureSDK.ALL_SCREENS_UPDATED -> {
+                        sendEvent(mapOf("type" to "fullSync", "identifier" to identifier))
+                    }
+                    CMSCureSDK.COLORS_UPDATED -> {
+                        sendEvent(mapOf("type" to "colors", "identifier" to identifier))
+                    }
+                    CMSCureSDK.IMAGES_UPDATED -> {
+                        sendEvent(mapOf("type" to "images", "identifier" to identifier))
+                    }
+                    else -> {
+                        // Check if it's a data store
+                        if (CMSCureSDK.getStoreItems(identifier).isNotEmpty()) {
+                            sendEvent(mapOf("type" to "dataStore", "identifier" to identifier))
+                        } else {
+                            sendEvent(mapOf("type" to "translations", "identifier" to identifier))
+                        }
+                    }
+                }
             }
         }
     }
+
     
     private fun sendEvent(payload: Map<String, Any?>) {
         reactContext
@@ -41,6 +60,12 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
         val apiKey = config.getString("apiKey")
         if (projectId != null && apiKey != null) {
             CMSCureSDK.configure(reactContext.applicationContext, projectId, apiKey)
+            // Trigger initial sync after configuration
+            scope.launch {
+                delay(100) // Small delay to ensure SDK is ready
+                CMSCureSDK.sync("__colors__") {}
+                CMSCureSDK.sync("__images__") {}
+            }
         }
     }
     
@@ -99,6 +124,16 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     @ReactMethod
     fun colorValue(key: String, promise: Promise) {
         promise.resolve(CMSCureSDK.colorValue(key))
+    }
+
+    @ReactMethod
+    fun imageUrl(key: String, tab: String, promise: Promise) {
+        try {
+            val url = CMSCureSDK.translation(forKey = key, inTab = tab)
+            promise.resolve(if (url.isEmpty()) null else url)
+        } catch (e: Exception) {
+            promise.reject("IMAGE_URL_TAB_FAILED", e)
+        }
     }
     
     @ReactMethod

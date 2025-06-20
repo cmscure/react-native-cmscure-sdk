@@ -26,31 +26,57 @@ export const CMSCureProvider = ({ children }) => {
   useEffect(() => {
     let isMounted = true;
     
+    // Initial data fetch
+    const fetchInitialData = async () => {
+        try {
+            // Sync important screens
+            await CMSCureSDKModule.sync("__colors__");
+            await CMSCureSDKModule.sync("__images__");
+            await CMSCureSDKModule.sync(CMSKeys.COMMON_CONFIG_TAB);
+            await CMSCureSDKModule.sync(CMSKeys.HOME_SCREEN_TAB);
+            setIsReady(true);
+        } catch (error) {
+            console.error('[RN] Initial sync failed:', error);
+        }
+    };
+    
+    fetchInitialData();
+    
     const listener = eventEmitter.addListener('onContentUpdated', (update) => {
-      if (!isMounted) return;
-      // The new event structure is an object { type, identifier }
-      const { type, identifier } = update;
-      
-      console.log(`[RN] Received update: ${type} for ${identifier}`);
+        if (!isMounted) return;
+        const { type, identifier } = update;
+        
+        console.log(`[RN] Received update: ${type} for ${identifier}`);
 
-      switch (type) {
-        case 'translations': break;
-        case 'colors': break;
-        case 'images': break;
-        case 'dataStore':
-          CMSCureSDKModule.getStoreItems(identifier).then(data => {
-            setSdkData(prev => ({ ...prev, dataStores: { ...prev.dataStores, [identifier]: { items: data, isLoading: false } } }));
-          });
-          break;
-        case 'fullSync': break;
-      }
+        switch (type) {
+            case 'translations':
+            case 'colors':
+            case 'images':
+            case 'fullSync':
+                // Force a re-render by updating a dummy state
+                setSdkData(prev => ({ ...prev, _updateToken: Date.now() }));
+                break;
+            case 'dataStore':
+                CMSCureSDKModule.getStoreItems(identifier).then(data => {
+                    setSdkData(prev => ({ 
+                        ...prev, 
+                        dataStores: { 
+                            ...prev.dataStores, 
+                            [identifier]: { items: data, isLoading: false } 
+                        } 
+                    }));
+                }).catch(error => {
+                    console.error(`[RN] Failed to fetch store items for ${identifier}:`, error);
+                });
+                break;
+        }
     });
 
     return () => {
-      isMounted = false;
-      listener.remove();
+        isMounted = false;
+        listener.remove();
     };
-  }, []);
+}, []);
 
   return (
     <CMSCureContext.Provider value={{ ...sdkData, isReady }}>
@@ -123,16 +149,14 @@ export const CureSDKImage = ({ url, ...props }) => {
 export const Cure = {
   configure: (config) => CMSCureSDKModule.configure(config),
   configure: (config) => {
-     // on iOS the bridge method is (projectId, apiKey, projectSecret)
-      if (Platform.OS === 'ios') {
-          return CMSCureSDKModule.configure(
-            config.projectId,
-            config.apiKey,
-            config.projectSecret
-          );
-      }
-       // Android can take the whole map
-        return CMSCureSDKModule.configure(config);
+    if (Platform.OS === 'ios') {
+      return CMSCureSDKModule.configure(
+        config.projectId,
+        config.apiKey,
+        config.projectSecret
+      );
+    }
+    return CMSCureSDKModule.configure(config);
   },
   setLanguage: (code) => CMSCureSDKModule.setLanguage(code),
   getLanguage: () => CMSCureSDKModule.getLanguage(),
