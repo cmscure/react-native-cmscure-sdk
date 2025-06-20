@@ -1,4 +1,4 @@
-package com.cmscure.sdk
+package com.reactnativecmscuresdk
 
 import android.annotation.SuppressLint
 import android.content.Context
