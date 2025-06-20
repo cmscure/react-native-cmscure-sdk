@@ -1,50 +1,54 @@
-// In cmscure-sdk-native-module/ios/CMSCureSDKModule.swift
-
 import Foundation
+import CMSCureSDK // Assuming your native SDK is available as a module
 
 @objc(CMSCureSDKModule)
 class CMSCureSDKModule: RCTEventEmitter {
 
     override init() {
         super.init()
+        // Listen for the unified notification from the native SDK
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleContentUpdated(notification:)),
-            name: .translationsUpdated,
+            name: .translationsUpdated, // This is the single notification now
             object: nil
         )
     }
 
     private static let CONTENT_UPDATED_EVENT = "onContentUpdated"
 
-    // --- THIS FUNCTION IS NOW CORRECTED ---
     @objc(handleContentUpdated:)
     private func handleContentUpdated(notification: Notification) {
-        guard let screenName = notification.userInfo?["screenName"] as? String else {
-            sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: "__ALL__")
+        // The native SDK now sends a single notification type.
+        // We can inspect the userInfo to see what changed.
+        guard let userInfo = notification.userInfo,
+              let identifier = userInfo["screenName"] as? String else {
+            // If no specific identifier, assume a full sync
+            sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: ["type": "fullSync"])
             return
         }
 
-        var eventIdentifier = screenName
+        var eventPayload: [String: Any] = ["identifier": identifier]
 
-        // Map internal names to public event names, just like Android
-        if screenName == "__colors__" {
-            eventIdentifier = "__COLORS_UPDATED__"
-        } else if screenName == "__images__" {
-            eventIdentifier = "__IMAGES_UPDATED__"
+        if identifier == "__colors__" {
+            eventPayload["type"] = "colors"
+        } else if identifier == "__images__" {
+            eventPayload["type"] = "images"
+        } else if Cure.shared.getStoreItems(for: identifier).count > 0 || identifier.contains("store") { // Heuristic
+            eventPayload["type"] = "dataStore"
+        } else {
+            eventPayload["type"] = "translations"
         }
         
-        print("[CMSCureSDKModule] Firing event onContentUpdated with identifier: \(eventIdentifier)")
-        sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: eventIdentifier)
+        sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: eventPayload)
     }
-    // --- END OF FIX ---
 
     override func supportedEvents() -> [String]! {
         return [CMSCureSDKModule.CONTENT_UPDATED_EVENT]
     }
 
     override static func requiresMainQueueSetup() -> Bool {
-        return true
+        return false // Configuration can happen in the background
     }
 
     @objc(configure:apiKey:projectSecret:resolver:rejecter:)
@@ -114,5 +118,42 @@ class CMSCureSDKModule: RCTEventEmitter {
                 reject("sync_failed", "Sync failed for screen: \(screenName)", error)
             }
         }
+    }
+
+    @objc(getStoreItems:resolver:rejecter:)
+    func getStoreItems(apiIdentifier: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let items = Cure.shared.getStoreItems(for: apiIdentifier).map { $0.toDictionary() }
+        resolve(items)
+    }
+
+    @objc(syncStore:resolver:rejecter:)
+    func syncStore(apiIdentifier: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        Cure.shared.syncStore(apiIdentifier: apiIdentifier) { success in
+            resolve(success)
+        }
+    }    
+}
+
+// Add a helper to convert DataStoreItem to a Dictionary for React Native
+extension DataStoreItem {
+    func toDictionary() -> [String: Any] {
+        return [
+            "id": self.id,
+            "data": self.data.mapValues { $0.toDictionary() },
+            "createdAt": self.createdAt,
+            "updatedAt": self.updatedAt,
+        ]
+    }
+}
+
+extension JSONValue {
+    func toDictionary() -> [String: Any?] {
+        var dict: [String: Any?] = [:]
+        dict["stringValue"] = self.stringValue
+        dict["intValue"] = self.intValue
+        dict["doubleValue"] = self.doubleValue
+        dict["boolValue"] = self.boolValue
+        dict["localizedString"] = self.localizedString
+        return dict
     }
 }

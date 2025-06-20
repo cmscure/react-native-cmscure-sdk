@@ -1,9 +1,6 @@
-// In cmscure-sdk-native-module/ios/CMSCureSDKModule.m
-
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
-// Expose the Swift class "CMSCureSDKModule" and name it "CMSCureSDKModule" in JavaScript.
 @interface RCT_EXTERN_MODULE(CMSCureSDKModule, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(configure:(NSString *)projectId
@@ -20,6 +17,14 @@ RCT_EXTERN_METHOD(getLanguage:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(availableLanguages:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getStoreItems:(NSString *)apiIdentifier
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(syncStore:(NSString *)apiIdentifier
+                  resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 RCT_EXTERN_METHOD(translation:(NSString *)key

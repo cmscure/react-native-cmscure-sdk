@@ -1,20 +1,18 @@
 package com.cmscure.sdk
 
-import android.os.Build
-import androidx.annotation.RequiresApi
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.Main)
     private val CONTENT_UPDATED_EVENT = "onContentUpdated"
 
     init {
-        // Initialize the SDK as soon as the module is created
         CMSCureSDK.init(reactContext.applicationContext)
         listenForContentUpdates()
     }
@@ -23,39 +21,48 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
 
     private fun listenForContentUpdates() {
         scope.launch {
-            CMSCureSDK.contentUpdateFlow.collect { updatedIdentifier ->
-                sendEvent(updatedIdentifier)
+            CMSCureSDK.contentUpdateFlow.collect {
+                // The new SDK emits a UUID. We just need to signal a generic update.
+                // We'll let the JS layer re-fetch what it needs.
+                sendEvent(mapOf("type" to "fullSync"))
             }
         }
     }
-
-    private fun sendEvent(eventName: String, params: WritableMap? = null) {
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(eventName, params)
-    }
     
-    private fun sendEvent(body: String) {
+    private fun sendEvent(payload: Map<String, Any?>) {
         reactContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(CONTENT_UPDATED_EVENT, body)
+            .emit(CONTENT_UPDATED_EVENT, Arguments.makeNativeMap(payload))
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     @ReactMethod
-    fun configure(projectId: String, apiKey: String, projectSecret: String, promise: Promise) {
-        try {
-            CMSCureSDK.configure(
-                context = reactContext.applicationContext,
-                projectId = projectId,
-                apiKey = apiKey,
-                projectSecret = projectSecret
-            )
-            // Configuration is async internally. We resolve immediately.
-            // Real-time updates will be handled by the event emitter.
-            promise.resolve("Configuration process initiated.")
-        } catch (e: Exception) {
-            promise.reject("configure_failed", e)
+    fun configure(config: ReadableMap) {
+        val projectId = config.getString("projectId")
+        val apiKey = config.getString("apiKey")
+        if (projectId != null && apiKey != null) {
+            CMSCureSDK.configure(reactContext.applicationContext, projectId, apiKey)
+        }
+    }
+    
+    @ReactMethod
+    fun getStoreItems(apiIdentifier: String, promise: Promise) {
+        val items = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier).map { it.toWritableMap() }
+        promise.resolve(Arguments.makeNativeArray(items))
+    }
+
+    @ReactMethod
+    fun getAllDataStores(promise: Promise) {
+        val stores = CMSCureSDK.loadDataStoreListFromDisk().mapValues { entry ->
+            Arguments.makeNativeArray(entry.value.map { it.toWritableMap() })
+        }
+        promise.resolve(Arguments.makeNativeMap(stores))
+    }
+
+    @ReactMethod
+    fun syncStore(apiIdentifier: String, promise: Promise) {
+        CMSCureSDK.syncStore(apiIdentifier) { success ->
+            promise.resolve(success)
         }
     }
 
@@ -117,4 +124,20 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
             }
         }
     }
+}
+
+// Helper extension functions to convert data models to WritableMaps for React Native
+fun DataStoreItem.toWritableMap(): WritableMap = Arguments.createMap().apply {
+    putString("id", id)
+    putMap("data", Arguments.makeNativeMap(data.mapValues { it.value.toWritableMap() }))
+    putString("createdAt", createdAt)
+    putString("updatedAt", updatedAt)
+}
+
+fun JSONValue.toWritableMap(): WritableMap = Arguments.createMap().apply {
+    putString("stringValue", stringValue)
+    putInt("intValue", intValue ?: 0) // Or handle null appropriately
+    putDouble("doubleValue", doubleValue ?: 0.0)
+    putBoolean("boolValue", boolValue ?: false)
+    putString("localizedString", localizedString)
 }

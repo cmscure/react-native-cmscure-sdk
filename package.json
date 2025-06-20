@@ -1,7 +1,7 @@
 {
   "name": "@cmscure/react-native-cmscure-sdk",
-  "version": "0.1.7",
-  "description": "React Native SDK for integrating with the CMSCure platform, providing dynamic content, translations, and real-time updates via WebSockets.",
+  "version": "0.1.8",
+  "description": "React Native SDK for CMSCure. Manage UI content, styles, and data stores in real-time.",
   "main": "src/index.js",
   "types": "index.d.ts",
   "scripts": {
@@ -27,11 +27,7 @@
     "websockets",
     "real-time"
   ],
-  "author": {
-    "name": "CMSCure",
-    "email": "hamza@reignsol.com",
-    "url": "https://cmscure.com"
-  },
+  "author": "CMSCure",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/cmscure/react-native-cmscure-sdk/issues"
@@ -56,7 +52,8 @@
     "android/",
     "ios/",
     "src/",
-    "index.d.ts"
+    "index.d.ts",
+    "react-native-cmscure-sdk.podspec"
   ],
   "react-native": "src/index.js",
   "source": "src/index.js"

@@ -1,130 +1,122 @@
 // index.d.ts
-// Place this file in the root of your react-native-cmscure-sdk directory
 
-declare module 'react-native-cmscure-sdk' { // Use the same name as in your package.json
+import React from 'react';
+import { ImageProps } from 'react-native';
 
-  export interface CMSCureSDKConfigureOptions {
-    projectId: string;
-    apiKey: string;
-    projectSecret: string;
-    // serverUrl and socketIOUrl are now hardcoded in the native SDKs
-    // pollingIntervalSeconds is removed as polling is deprecated
-  }
+// --- Data Structures ---
 
-  export interface ContentUpdateEvent {
-    type: 'ALL_SCREENS_UPDATED' | 'COLORS_UPDATED' | 'SCREEN_UPDATED' | 'ERROR';
-    screenName?: string; // Present if type is 'SCREEN_UPDATED'
-    error?: string;      // Present if type is 'ERROR'
-  }
-
-  export interface SDKSubscription {
-    remove: () => void;
-  }
-
-  const CMSCureSDK: {
-    /**
-     * Configures the CMSCureSDK with necessary project credentials.
-     * Server and Socket URLs are hardcoded.
-     * This method MUST be called once, typically early in your application's lifecycle.
-     */
-    configure: (options: CMSCureSDKConfigureOptions) => Promise<void | string>;
-
-    /**
-     * Sets the current active language for retrieving translations.
-     * @param languageCode - The language code (e.g., "en", "fr").
-     * @param force - If true, forces updates even if the language is the same. Defaults to false.
-     */
-    setLanguage: (languageCode: string, force?: boolean) => Promise<void | string>;
-
-    /**
-     * Retrieves the currently active language code.
-     */
-    getLanguage: () => Promise<string>;
-
-    /**
-     * Fetches the list of available language codes supported by the project.
-     */
-    getAvailableLanguages: () => Promise<string[]>;
-
-    /**
-     * Initiates or ensures the SDK is listening for real-time updates (e.g., socket connection).
-     */
-    startListening: () => Promise<void | string>;
-
-    /**
-     * Retrieves a translation for a specific key and tab.
-     * @param key - The translation key.
-     * @param tab - The tab/screen name.
-     * @returns The translated string, or an empty string if not found.
-     */
-    translation: (key: string, tab: string) => Promise<string>;
-
-    /**
-     * Retrieves a color hex string for a given key.
-     * @param key - The color key.
-     * @returns The color hex string (e.g., "#RRGGBB"), or null if not found.
-     */
-    colorValue: (key: string) => Promise<string | null>;
-
-    /**
-     * Retrieves an image URL for a given key and tab.
-     * @param key - The image URL key.
-     * @param tab - The tab/screen name.
-     * @returns The image URL string, or null if not found or invalid.
-     */
-    imageUrl: (key: string, tab: string) => Promise<string | null>;
-
-    /**
-     * Fetches the latest content for a specific screen/tab.
-     * @param screenName - The name of the screen/tab.
-     */
-    sync: (screenName: string) => Promise<void | string>;
-
-    /**
-     * Checks if the SDK's Socket.IO client is connected and handshake is acknowledged.
-     */
-    isConnected: () => Promise<boolean>;
-
-    /**
-     * Enables or disables verbose debug logging in the native SDKs.
-     * @param enabled - True to enable logs, false to disable.
-     */
-    setDebugLogsEnabled: (enabled: boolean) => Promise<void>;
-
-    /**
-     * Clears all cached data, persisted files, and resets relevant SDK state.
-     * The SDK may require re-configuration after calling this method.
-     */
-    clearCache: () => Promise<void | string>;
-
-    /**
-     * Retrieves the list of known project tabs/screens from the native SDK.
-     */
-    getKnownTabs: () => Promise<string[] | undefined>;
-
-    /**
-     * Attempts to sync content for all tabs currently known to the SDK.
-     */
-    syncAllTabs: () => Promise<void>;
-
-    /**
-     * Adds a listener for CMSCure content update events.
-     * @param listener - A callback function that receives event objects.
-     * @returns A subscription object with a `remove()` method to unsubscribe.
-     */
-    addContentUpdateListener: (listener: (event: ContentUpdateEvent) => void) => SDKSubscription | undefined;
-
-    /**
-     * Removes a previously added content update listener.
-     * @param subscription - The subscription object returned by `addContentUpdateListener`.
-     */
-    removeContentUpdateListener: (subscription?: SDKSubscription) => void;
-
-    /**
-     * Removes all listeners for the 'CMSCureContentUpdated' event. Use with caution.
-     */
-    removeAllContentUpdateListeners: () => void;
-  };
-
-  export default CMSCureSDK;
+/** Represents a single item from a CMSCure Data Store. */
+export interface DataStoreItem {
+  id: string;
+  data: { [key: string]: JSONValue };
+  createdAt: string;
+  updatedAt: string;
 }
+
+/** Represents a dynamic value from a Data Store item's data. */
+export interface JSONValue {
+  stringValue?: string;
+  intValue?: number;
+  doubleValue?: number;
+  boolValue?: boolean;
+  localizedString?: string;
+}
+
+// --- Configuration ---
+
+export interface CMSCureConfig {
+  projectId: string;
+  apiKey: string;
+  projectSecret: string;
+}
+
+// --- Hooks API (Recommended) ---
+
+/**
+ * Provides the CMSCure context to its children. Must be at the root of your app.
+ */
+export const CMSCureProvider: React.FC<{ children: React.ReactNode }>;
+
+/**
+ * A hook that provides a live translation string from the CMS.
+ * @param key The translation key.
+ * @param tab The tab/screen name where the key is located.
+ * @param fallback The default string to display while loading or if the key is not found.
+ * @returns The translated string.
+ */
+export function useCureString(key: string, tab: string, fallback?: string): string;
+
+/**
+ * A hook that provides a live color hex string from the CMS.
+ * @param key The global color key.
+ * @param fallback The default color hex string (e.g., '#FFFFFF').
+ * @returns The color hex string.
+ */
+export function useCureColor(key: string, fallback?: string): string;
+
+/**
+ * A hook that provides a live image URL from the CMS.
+ * @param key The key for the image asset.
+ * @param tab Optional tab/screen name for screen-dependent images. If omitted, fetches from global assets.
+ * @returns The image URL string, or null if not found.
+ */
+export function useCureImage(key: string, tab?: string): string | null;
+
+/**
+ * A hook that provides a live, auto-updating list of items from a Data Store.
+ * @param apiIdentifier The unique API identifier of the Data Store.
+ * @returns An object containing the array of items and a loading state.
+ */
+export function useCureDataStore(apiIdentifier: string): { items: DataStoreItem[]; isLoading: boolean };
+
+// --- Component API ---
+
+interface CureSDKImageProps extends ImageProps {
+  url: string | null;
+}
+
+/** A cache-enabled component for displaying images from CMSCure. */
+export const CureSDKImage: React.FC<CureSDKImageProps>;
+
+// --- Manual API (for advanced use cases) ---
+
+export const Cure: {
+  /**
+   * Configures the SDK. Automatically called by the provider.
+   */
+  configure: (config: CMSCureConfig) => void;
+  configure: (config: CMSCureConfig) => Promise;
+
+  /**
+   * Sets the active language and triggers a content refresh.
+   */
+  setLanguage: (languageCode: string) => Promise<void>;
+
+  /**
+   * Gets the currently active language code.
+   */
+  getLanguage: () => Promise<string>;
+
+  /**
+   * Fetches the list of available language codes for the project.
+   */
+  availableLanguages: () => Promise<string[]>;
+
+  /**
+   * Manually triggers a sync for a specific Data Store.
+   */
+  syncStore: (apiIdentifier: string) => Promise<boolean>;
+
+  
+  sync: (screenName: string) => Promise<void>;
+
+  /**
+   * Fetches a single item from a Data Store by its ID.
+   */
+  getStoreItems: (apiIdentifier: string) => Promise<DataStoreItem[]>;
+  getAllDataStores: () => Promise<{ [id: string]: DataStoreItem[] }>;
+  translation: (key: string, tab: string) => Promise<string>;
+  colorValue: (key: string) => Promise<string>;
+  imageUrl: (key: string, tab: string) => Promise<string>;
+  imageURL: (key: string) => Promise<string>;
+};
