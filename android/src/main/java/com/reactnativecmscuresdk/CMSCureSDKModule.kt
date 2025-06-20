@@ -35,7 +35,6 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
             .emit(CONTENT_UPDATED_EVENT, Arguments.makeNativeMap(payload))
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     @ReactMethod
     fun configure(config: ReadableMap) {
         val projectId = config.getString("projectId")
@@ -46,18 +45,18 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     }
     
     @ReactMethod
-    fun getStoreItems(apiIdentifier: String, promise: Promise) {
-        val items = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier).map { it.toWritableMap() }
-        promise.resolve(Arguments.makeNativeArray(items))
-    }
-
-    @ReactMethod
-    fun getAllDataStores(promise: Promise) {
-        val stores = CMSCureSDK.loadDataStoreListFromDisk().mapValues { entry ->
-            Arguments.makeNativeArray(entry.value.map { it.toWritableMap() })
-        }
-        promise.resolve(Arguments.makeNativeMap(stores))
-    }
+    fun getStoreItems(screenName: String, promise: Promise) {
+     try {
+       val items: List<DataStoreItem> = CMSCureSDK.getStoreItems(screenName)
+       val jsArray: WritableArray = Arguments.createArray()
+       items.forEach { item ->
+         jsArray.pushMap(item.toWritableMap())
+       }
+       promise.resolve(jsArray)
+     } catch (e: Exception) {
+       promise.reject("GET_STORE_ITEMS_FAILED", e)
+     }
+   }
 
     @ReactMethod
     fun syncStore(apiIdentifier: String, promise: Promise) {
@@ -66,7 +65,6 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     @ReactMethod
     fun setLanguage(languageCode: String, promise: Promise) {
        // The Kotlin SDK's setLanguage is fire-and-forget but triggers async syncs.
@@ -104,16 +102,16 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     }
     
     @ReactMethod
-    fun imageUrl(key: String, tab: String, promise: Promise) {
-        promise.resolve(CMSCureSDK.imageUrl(key, tab)?.toString())
-    }
-
-    @ReactMethod
     fun imageURL(key: String, promise: Promise) {
-        promise.resolve(CMSCureSDK.imageURL(key)?.toString())
+        try {
+                // CMSCureSDK.imageURL returns String?, so coalesce to empty string if null
+                val urlOrEmpty: String = CMSCureSDK.imageURL(key) ?: ""
+                promise.resolve(urlOrEmpty)
+            } catch (e: Exception) {
+                promise.reject("IMAGE_URL_FAILED", e)
+            }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
     @ReactMethod
     fun sync(screenName: String, promise: Promise) {
         CMSCureSDK.sync(screenName) { success ->

@@ -1,20 +1,21 @@
 // This file is part of the CMSCure SDK for React Native.
 // It is used to configure the Android build settings for the CMSCure SDK module.   
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+
 plugins {
   id 'com.android.library'
   id 'org.jetbrains.kotlin.android'        // <— make sure this is here
-  id 'androidx.compose.compiler' version '1.5.11'
-}
-
-buildscript {
-  dependencies {
-    classpath "androidx.compose:compose-compiler:1.5.11"
-  }
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
 }
 
 android {
     // Use compileSdkVersion and buildToolsVersion from the root project
-    namespace "com.cmscure.sdk"
+    namespace "com.reactnativecmscuresdk"
     compileSdkVersion 35
     buildToolsVersion rootProject.ext.buildToolsVersion
 
@@ -28,7 +29,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion '1.5.11'
+        kotlinCompilerExtensionVersion '1.5.15'
     }
 
     buildTypes {
@@ -42,18 +43,15 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 }
 
-repositories {
-    mavenCentral()
-    google()
-}
+
 
 dependencies {
     implementation 'com.facebook.react:react-native:+' 
@@ -68,7 +66,7 @@ dependencies {
     implementation 'io.socket:socket.io-client:2.0.1' // Or the version your SDK uses
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4' // Or a newer compatible version
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4' // Match coroutines-core
-    implementation 'io.coil-kt:coil:2.5.0' 
+    // implementation 'io.coil-kt:coil:2.5.0' 
     implementation 'com.facebook.react:react-native:+'
    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.23"
    def composeBom = platform("androidx.compose:compose-bom:2024.02.00")
@@ -77,4 +75,9 @@ dependencies {
    implementation "androidx.compose.runtime:runtime"
    implementation "androidx.compose.material3:material3"
    implementation "androidx.compose.ui:ui-graphics"
+    implementation "androidx.compose.compiler:compiler:1.5.15"
+    // implementation("io.coil-kt.coil3:coil-compose:3.2.0")
+implementation("io.coil-kt:coil-compose:2.2.2")
+
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
 }
