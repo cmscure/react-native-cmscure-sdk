@@ -1,2 +1,6 @@
-<manifest xmlns:android="[http://schemas.android.com/apk/res/android](http://schemas.android.com/apk/res/android)">
-    </manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.reactnativecmscuresdk">
+
+  <!-- if you don’t need anything in <application> you can leave it empty -->
+  <application/>
+</manifest>
