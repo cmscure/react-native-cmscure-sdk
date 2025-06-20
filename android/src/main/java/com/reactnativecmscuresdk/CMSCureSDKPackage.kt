@@ -1,4 +1,4 @@
-package com.cmscure.sdk
+package com.reactnativecmscuresdk
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
@@ -6,11 +6,11 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
 class CMSCureSDKPackage : ReactPackage {
-    override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(CMSCureSDKModule(reactContext))
-    }
+  override fun createNativeModules(
+    reactContext: ReactApplicationContext
+  ): List<NativeModule> = listOf(CMSCureSDKModule(reactContext))
 
-    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-        return emptyList()
-    }
+  override fun createViewManagers(
+    reactContext: ReactApplicationContext
+  ): List<ViewManager<*, *>> = emptyList()
 }
