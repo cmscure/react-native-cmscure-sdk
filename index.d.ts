@@ -114,7 +114,6 @@ export const Cure: {
    * Fetches a single item from a Data Store by its ID.
    */
   getStoreItems: (apiIdentifier: string) => Promise<DataStoreItem[]>;
-  getAllDataStores: () => Promise<{ [id: string]: DataStoreItem[] }>;
   translation: (key: string, tab: string) => Promise<string>;
   colorValue: (key: string) => Promise<string>;
   imageUrl: (key: string, tab: string) => Promise<string>;

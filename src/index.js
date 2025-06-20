@@ -34,52 +34,15 @@ export const CMSCureProvider = ({ children }) => {
       console.log(`[RN] Received update: ${type} for ${identifier}`);
 
       switch (type) {
-        case 'translations':
-          CMSCureSDKModule.getTranslationsForTab(identifier).then(data => {
-            setSdkData(prev => ({ ...prev, translations: { ...prev.translations, [identifier]: data } }));
-          });
-          break;
-        case 'colors':
-          CMSCureSDKModule.getAllColors().then(data => {
-            setSdkData(prev => ({ ...prev, colors: data }));
-          });
-          break;
-        case 'images':
-          CMSCureSDKModule.getAllImages().then(data => {
-            setSdkData(prev => ({ ...prev, images: data }));
-          });
-          break;
+        case 'translations': break;
+        case 'colors': break;
+        case 'images': break;
         case 'dataStore':
           CMSCureSDKModule.getStoreItems(identifier).then(data => {
             setSdkData(prev => ({ ...prev, dataStores: { ...prev.dataStores, [identifier]: { items: data, isLoading: false } } }));
           });
           break;
-        case 'fullSync':
-          // On full sync, refetch everything
-          Promise.all([
-            CMSCureSDKModule.getAllTranslations(),
-            CMSCureSDKModule.getAllColors(),
-            CMSCureSDKModule.getAllImages(),
-            CMSCureSDKModule.getAllDataStores()
-          ]).then(([translations, colors, images, dataStores]) => {
-            if (isMounted) {
-              setSdkData({ translations, colors, images, dataStores });
-            }
-          });
-          break;
-      }
-    });
-
-    // Initial fetch
-    Promise.all([
-      CMSCureSDKModule.getAllTranslations(),
-      CMSCureSDKModule.getAllColors(),
-      CMSCureSDKModule.getAllImages(),
-      CMSCureSDKModule.getAllDataStores()
-    ]).then(([translations, colors, images, dataStores]) => {
-      if (isMounted) {
-        setSdkData({ translations, colors, images, dataStores });
-        setIsReady(true);
+        case 'fullSync': break;
       }
     });
 
@@ -177,7 +140,6 @@ export const Cure = {
   syncStore: (apiIdentifier) => CMSCureSDKModule.syncStore(apiIdentifier),
   sync:            (screenName)      => CMSCureSDKModule.sync(screenName),
   getStoreItems:   (id)              => CMSCureSDKModule.getStoreItems(id),
-  getAllDataStores:()                => CMSCureSDKModule.getAllDataStores(),
   translation:     (key, tab)        => CMSCureSDKModule.translation(key, tab),
   colorValue:      (key)             => CMSCureSDKModule.colorValue(key),
   imageUrl:        (key, tab)        => CMSCureSDKModule.imageUrl(key, tab),
