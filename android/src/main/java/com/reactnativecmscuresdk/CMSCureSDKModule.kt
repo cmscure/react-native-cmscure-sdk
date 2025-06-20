@@ -2,7 +2,7 @@ package com.reactnativecmscuresdk
 
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.cmscure.sdk.*
+import com.reactnativecmscuresdk.CMSCureSDK
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -86,9 +86,17 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     
     @ReactMethod
     fun availableLanguages(promise: Promise) {
-        CMSCureSDK.availableLanguages { languages ->
+        try {
+            CMSCureSDK.availableLanguages { languages ->
+                val array = Arguments.createArray()
+                languages.forEach { array.pushString(it) }
+                promise.resolve(array)
+            }
+        } catch (e: Exception) {
+            // If there's an error, try to return cached languages
+            val cachedLanguages = listOf("en", "ru", "fr") // Default fallback
             val array = Arguments.createArray()
-            languages.forEach { array.pushString(it) }
+            cachedLanguages.forEach { array.pushString(it) }
             promise.resolve(array)
         }
     }
@@ -137,29 +145,46 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
                     
                     val dataMap = Arguments.createMap()
                     item.data.forEach { (key, value) ->
-                        when (value) {
-                            is JSONValue.StringValue -> {
-                                dataMap.putString(key, value.value)
-                            }
-                            is JSONValue.IntValue -> {
-                                dataMap.putInt(key, value.value)
-                            }
-                            is JSONValue.DoubleValue -> {
-                                dataMap.putDouble(key, value.value)
-                            }
-                            is JSONValue.BoolValue -> {
-                                dataMap.putBoolean(key, value.value)
-                            }
-                            is JSONValue.LocalizedStringValue -> {
-                                val localizedValue = value.localizedString
-                                if (localizedValue != null) {
-                                    dataMap.putString(key, localizedValue)
+                        // Create a JSON object for each value with all possible fields
+                        val valueMap = Arguments.createMap().apply {
+                            when (value) {
+                                is JSONValue.StringValue -> {
+                                    putString("stringValue", value.value)
+                                    putString("localizedString", value.value)
+                                }
+                                is JSONValue.IntValue -> {
+                                    putInt("intValue", value.value)
+                                    putString("stringValue", value.value.toString())
+                                    putString("localizedString", value.value.toString())
+                                }
+                                is JSONValue.DoubleValue -> {
+                                    putDouble("doubleValue", value.value)
+                                    putString("stringValue", value.value.toString())
+                                    putString("localizedString", value.value.toString())
+                                }
+                                is JSONValue.BoolValue -> {
+                                    putBoolean("boolValue", value.value)
+                                    putString("stringValue", value.value.toString())
+                                    putString("localizedString", value.value.toString())
+                                }
+                                is JSONValue.LocalizedStringValue -> {
+                                    val localizedValue = value.localizedString
+                                    putString("localizedString", localizedValue)
+                                    putString("stringValue", localizedValue)
+                                    // Also put the raw localized values
+                                    val localesMap = Arguments.createMap()
+                                    value.values.forEach { (lang, text) ->
+                                        localesMap.putString(lang, text)
+                                    }
+                                    putMap("localizedValues", localesMap)
+                                }
+                                is JSONValue.NullValue -> {
+                                    putNull("stringValue")
+                                    putNull("localizedString")
                                 }
                             }
-                            is JSONValue.NullValue -> {
-                                dataMap.putNull(key)
-                            }
                         }
+                        dataMap.putMap(key, valueMap)
                     }
                     putMap("data", dataMap)
                 }

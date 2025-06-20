@@ -10,7 +10,8 @@ import React, {
   useState, 
   useEffect, 
   useRef, 
-  useCallback 
+  useCallback,
+  useMemo
 } from 'react';
 
 const { CMSCureSDK } = NativeModules;
@@ -52,27 +53,31 @@ export const Cure = {
 export const CMSCureProvider = ({ children, config }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [updateToken, setUpdateToken] = useState(0);
-  const cacheRef = useRef({
-    translations: {},
-    colors: {},
-    images: {},
-    dataStores: {}
-  });
+  const dataStoreCache = useRef({});
+  const translationCache = useRef({});
+  const colorCache = useRef({});
+  const imageCache = useRef({});
 
   useEffect(() => {
     let subscription;
+    let isMounted = true;
     
     const initializeSDK = async () => {
-      if (config) {
+      if (config && isMounted) {
         try {
           await Cure.configure(config);
-          setIsInitialized(true);
           
           // Initial sync of critical data
           await Promise.all([
             Cure.sync('__colors__'),
-            Cure.sync('__images__')
+            Cure.sync('__images__'),
+            Cure.sync('common_config'),
+            Cure.sync('home_screen')
           ]);
+          
+          if (isMounted) {
+            setIsInitialized(true);
+          }
         } catch (error) {
           console.error('Failed to initialize CMSCure SDK:', error);
         }
@@ -82,35 +87,56 @@ export const CMSCureProvider = ({ children, config }) => {
     initializeSDK();
 
     // Set up event listener
-    subscription = eventEmitter.addListener('CMSCureContentUpdate', (event) => {
+    subscription = eventEmitter.addListener('CMSCureContentUpdate', async (event) => {
+      if (!isMounted) return;
+      
       console.log('Content update received:', event);
       
       const { type, identifier } = event;
       
-      // Force re-render of components using this data
-      setUpdateToken(prev => prev + 1);
-      
       // Handle data store updates
       if (type === 'dataStore' && identifier) {
-        Cure.getStoreItems(identifier).then(items => {
-          cacheRef.current.dataStores[identifier] = items;
+        try {
+          // Clear the cache for this datastore to force fresh fetch
+          delete dataStoreCache.current[identifier];
+          // Force re-render which will trigger useCureDataStore to refetch
           setUpdateToken(prev => prev + 1);
-        }).catch(err => {
-          console.error(`Failed to fetch datastore ${identifier}:`, err);
-        });
+        } catch (err) {
+          console.error(`Failed to update datastore ${identifier}:`, err);
+        }
+      } else if (type === 'colors' || type === 'images' || type === 'translation' || type === 'all') {
+        // Clear relevant caches and force re-render
+        if (type === 'colors' || type === 'all') {
+          colorCache.current = {};
+        }
+        if (type === 'images' || type === 'all') {
+          imageCache.current = {};
+        }
+        if (type === 'translation' || type === 'all') {
+          translationCache.current = {};
+        }
+        if (type === 'all') {
+          // Also clear all datastore caches on full sync
+          dataStoreCache.current = {};
+        }
+        setUpdateToken(prev => prev + 1);
       }
     });
 
     return () => {
+      isMounted = false;
       subscription?.remove();
     };
   }, [config]);
 
-  const contextValue = {
+  const contextValue = useMemo(() => ({
     isInitialized,
     updateToken,
-    cache: cacheRef.current
-  };
+    dataStoreCache: dataStoreCache.current,
+    translationCache: translationCache.current,
+    colorCache: colorCache.current,
+    imageCache: imageCache.current
+  }), [isInitialized, updateToken]);
 
   return (
     <CMSCureContext.Provider value={contextValue}>
@@ -130,89 +156,123 @@ const useCMSCureContext = () => {
 
 // Hook for translations
 export const useCureString = (key, tab, defaultValue = '') => {
-  const { updateToken } = useCMSCureContext();
+  const { updateToken, translationCache } = useCMSCureContext();
   const [value, setValue] = useState(defaultValue);
+  const cacheKey = `${tab}:${key}`;
 
   useEffect(() => {
+    // Check cache first
+    if (translationCache[cacheKey] !== undefined) {
+      setValue(translationCache[cacheKey]);
+      return;
+    }
+
+    // Fetch from native
     Cure.translation(key, tab).then(result => {
-      setValue(result || defaultValue);
+      const finalValue = result || defaultValue;
+      translationCache[cacheKey] = finalValue;
+      setValue(finalValue);
     }).catch(() => {
       setValue(defaultValue);
     });
-  }, [key, tab, defaultValue, updateToken]);
+  }, [key, tab, defaultValue, updateToken, cacheKey, translationCache]);
 
   return value;
 };
 
 // Hook for colors
 export const useCureColor = (key, defaultValue = '#000000') => {
-  const { updateToken } = useCMSCureContext();
+  const { updateToken, colorCache } = useCMSCureContext();
   const [value, setValue] = useState(defaultValue);
 
   useEffect(() => {
+    // Check cache first
+    if (colorCache[key] !== undefined) {
+      setValue(colorCache[key]);
+      return;
+    }
+
+    // Fetch from native
     Cure.colorValue(key).then(result => {
-      setValue(result || defaultValue);
+      const finalValue = result || defaultValue;
+      colorCache[key] = finalValue;
+      setValue(finalValue);
     }).catch(() => {
       setValue(defaultValue);
     });
-  }, [key, defaultValue, updateToken]);
+  }, [key, defaultValue, updateToken, colorCache]);
 
   return value;
 };
 
 // Hook for images
 export const useCureImage = (key, tab = null) => {
-  const { updateToken } = useCMSCureContext();
+  const { updateToken, imageCache, translationCache } = useCMSCureContext();
   const [value, setValue] = useState(null);
+  const cacheKey = tab ? `${tab}:${key}` : key;
 
   useEffect(() => {
+    // Check cache first
+    const cache = tab ? translationCache : imageCache;
+    if (cache[cacheKey] !== undefined) {
+      setValue(cache[cacheKey]);
+      return;
+    }
+
+    // Fetch from native
     if (tab) {
       Cure.translation(key, tab).then(result => {
+        cache[cacheKey] = result || null;
         setValue(result || null);
       }).catch(() => {
         setValue(null);
       });
     } else {
       Cure.imageURL(key).then(result => {
+        cache[cacheKey] = result || null;
         setValue(result || null);
       }).catch(() => {
         setValue(null);
       });
     }
-  }, [key, tab, updateToken]);
+  }, [key, tab, updateToken, cacheKey, imageCache, translationCache]);
 
   return value;
 };
 
 // Hook for data stores
 export const useCureDataStore = (apiIdentifier) => {
-  const { updateToken, cache } = useCMSCureContext();
+  const { updateToken, dataStoreCache } = useCMSCureContext();
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(0);
 
   useEffect(() => {
     let mounted = true;
 
-    const fetchData = async () => {
+    const fetchData = async () => { 
       try {
         setIsLoading(true);
         
-        // First try to get from cache
-        if (cache.dataStores[apiIdentifier]) {
-          setItems(cache.dataStores[apiIdentifier]);
+        // Check if we have cached data and it's not been invalidated
+        if (dataStoreCache[apiIdentifier] && lastUpdate === updateToken) {
+          setItems(dataStoreCache[apiIdentifier]);
+          setIsLoading(false);
+          return;
         }
         
-        // Then sync from server
+        // Sync to get fresh data
         await Cure.syncStore(apiIdentifier);
         const freshItems = await Cure.getStoreItems(apiIdentifier);
         
         if (mounted) {
+          dataStoreCache[apiIdentifier] = freshItems;
           setItems(freshItems);
-          cache.dataStores[apiIdentifier] = freshItems;
+          setIsLoading(false);
+          setLastUpdate(updateToken);
         }
       } catch (error) {
         console.error(`Failed to fetch datastore ${apiIdentifier}:`, error);
-      } finally {
         if (mounted) {
           setIsLoading(false);
         }
@@ -224,7 +284,7 @@ export const useCureDataStore = (apiIdentifier) => {
     return () => {
       mounted = false;
     };
-  }, [apiIdentifier, updateToken, cache]);
+  }, [apiIdentifier, updateToken, dataStoreCache, lastUpdate]);
 
   return { items, isLoading };
 };
@@ -240,7 +300,7 @@ export const CureSDKImage = ({ url, style, ...props }) => {
       {...props}
     />
   );
-};
+}; 
 
 // Re-export everything
 export default Cure;

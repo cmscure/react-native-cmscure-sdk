@@ -17,9 +17,6 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import coil.ImageLoader
 import coil.request.ImageRequest
-//import coil.ImageLoader
-//import coil.compose.AsyncImage
-//import coil.request.ImageRequest
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonDeserializationContext

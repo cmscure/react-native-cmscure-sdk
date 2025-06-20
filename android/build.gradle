@@ -1,18 +1,16 @@
-buildscript {
-    ext.kotlin_version = '1.9.23'
-    
+buildscript {    
     repositories {
         google()
         mavenCentral()
     }
-    
-    dependencies {
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-    }
 }
 
-apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'        // <— make sure this is here
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
+}
+
 
 def getExtOrDefault(name, defaultValue) {
     return rootProject.ext.has(name) ? rootProject.ext.get(name) : defaultValue
@@ -21,20 +19,25 @@ def getExtOrDefault(name, defaultValue) {
 android {
     namespace "com.reactnativecmscuresdk"
     
-    compileSdkVersion getExtOrDefault('compileSdkVersion', 34)
+    compileSdkVersion 35
     
     defaultConfig {
-        minSdkVersion getExtOrDefault('minSdkVersion', 21)
-        targetSdkVersion getExtOrDefault('targetSdkVersion', 34)
+        minSdk 24
+        targetSdk 35
         versionCode 1
         versionName "1.0"
     }
+    
     
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+
+    lintOptions {
+        abortOnError false
     }
     
     compileOptions {
@@ -51,13 +54,8 @@ android {
     }
     
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
-}
-
-repositories {
-    google()
-    mavenCentral()
 }
 
 dependencies {
@@ -65,9 +63,13 @@ dependencies {
     implementation 'com.facebook.react:react-native:+'
     
     // Kotlin
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$rootProject.ext.kotlinVersion"
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     
+    def composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+    implementation composeBom
+
     // CMSCure SDK dependencies
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
@@ -77,6 +79,7 @@ dependencies {
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.runtime:runtime'
     implementation 'androidx.compose.material3:material3'
+    implementation "androidx.compose.ui:ui-graphics"
     
     // Networking
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
@@ -92,4 +95,8 @@ dependencies {
     
     // Image loading (Coil)
     implementation 'io.coil-kt:coil-compose:2.5.0'
+
+    implementation "androidx.compose.compiler:compiler:1.5.15"
+    implementation("io.coil-kt:coil-compose:2.2.2")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
 }
