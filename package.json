@@ -1,6 +1,6 @@
 {
   "name": "@cmscure/react-native-cmscure-sdk",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "React Native SDK for CMSCure. Manage UI content, styles, and data stores in real-time.",
   "main": "src/index.js",
   "types": "index.d.ts",
