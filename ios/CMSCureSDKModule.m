@@ -3,7 +3,10 @@
 #import "React/RCTBridgeModule.h"
 #import "CMSCureSDKModule.h"
 
-@interface RCT_EXPORT_MODULE(CMSCureSDKModule, NSObject)
+@implementation CMSCureSDKModule
+// @interface RCT_EXPORT_MODULE(CMSCureSDKModule, NSObject)
+
+RCT_EXPORT_MODULE(CMSCureSDK);
 
 // MARK: - Configuration Methods
 
