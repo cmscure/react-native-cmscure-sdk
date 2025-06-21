@@ -13,7 +13,7 @@ import React, {
   useCallback,
   useMemo
 } from 'react';
-
+console.log("RN NativeModules:", NativeModules);
 const { CMSCureSDK } = NativeModules;
 
 if (!CMSCureSDK) {
