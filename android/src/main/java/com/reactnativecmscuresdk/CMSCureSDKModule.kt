@@ -31,28 +31,38 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     }
     
     private fun sendContentUpdateEvent(identifier: String) {
-        val params = Arguments.createMap().apply {
-            putString("identifier", identifier)
-            when (identifier) {
-                CMSCureSDK.ALL_SCREENS_UPDATED -> putString("type", "all")
-                CMSCureSDK.COLORS_UPDATED -> putString("type", "colors")
-                CMSCureSDK.IMAGES_UPDATED -> putString("type", "images")
-                else -> {
-                    // Check if it's a datastore by trying to get items
-                    val items = CMSCureSDK.getStoreItems(identifier)
-                    if (items.isNotEmpty() || identifier in listOf("popular_destinations", "featured_destinations")) {
-                        putString("type", "dataStore")
-                    } else {
+    val params = Arguments.createMap().apply {
+        putString("identifier", identifier)
+        when (identifier) {
+            CMSCureSDK.ALL_SCREENS_UPDATED -> putString("type", "all")
+            CMSCureSDK.COLORS_UPDATED -> putString("type", "colors")
+            CMSCureSDK.IMAGES_UPDATED -> putString("type", "images")
+            else -> {
+                // Better detection for datastores
+                val knownDataStores = listOf("popular_destinations", "featured_destinations")
+                if (knownDataStores.contains(identifier)) {
+                    putString("type", "dataStore")
+                } else {
+                    // Try to determine by content
+                    try {
+                        val items = CMSCureSDK.getStoreItems(identifier)
+                        if (items.isNotEmpty()) {
+                            putString("type", "dataStore")
+                        } else {
+                            putString("type", "translation")
+                        }
+                    } catch (e: Exception) {
                         putString("type", "translation")
                     }
                 }
             }
         }
-        
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("CMSCureContentUpdate", params)
     }
+    
+    reactContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("CMSCureContentUpdate", params)
+}
     
     @ReactMethod
     fun configure(projectId: String, apiKey: String, promise: Promise) {
@@ -143,48 +153,60 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
                     putString("createdAt", item.createdAt)
                     putString("updatedAt", item.updatedAt)
                     
+                    // Put is_active at the root level
+                    val isActive = item.data["is_active"]?.boolValue ?: true
+                    putBoolean("is_active", isActive)
+                    
+                    // Create a proper data map with all fields
                     val dataMap = Arguments.createMap()
                     item.data.forEach { (key, value) ->
-                        // Create a JSON object for each value with all possible fields
-                        val valueMap = Arguments.createMap().apply {
-                            when (value) {
-                                is JSONValue.StringValue -> {
-                                    putString("stringValue", value.value)
-                                    putString("localizedString", value.value)
+                        // For each field, create a sub-object with all value types
+                        val valueMap = Arguments.createMap()
+                        
+                        when (value) {
+                            is JSONValue.StringValue -> {
+                                valueMap.putString("stringValue", value.value)
+                                valueMap.putString("localizedString", value.value)
+                                dataMap.putMap(key, valueMap)
+                            }
+                            is JSONValue.IntValue -> {
+                                valueMap.putInt("intValue", value.value)
+                                valueMap.putString("stringValue", value.value.toString())
+                                valueMap.putString("localizedString", value.value.toString())
+                                dataMap.putMap(key, valueMap)
+                            }
+                            is JSONValue.DoubleValue -> {
+                                valueMap.putDouble("doubleValue", value.value)
+                                valueMap.putString("stringValue", value.value.toString())
+                                valueMap.putString("localizedString", value.value.toString())
+                                dataMap.putMap(key, valueMap)
+                            }
+                            is JSONValue.BoolValue -> {
+                                valueMap.putBoolean("boolValue", value.value)
+                                valueMap.putString("stringValue", value.value.toString())
+                                valueMap.putString("localizedString", value.value.toString())
+                                dataMap.putMap(key, valueMap)
+                            }
+                            is JSONValue.LocalizedStringValue -> {
+                                val localizedValue = value.localizedString
+                                valueMap.putString("localizedString", localizedValue ?: "")
+                                valueMap.putString("stringValue", localizedValue ?: "")
+                                
+                                // Also include the raw localized values
+                                val localesMap = Arguments.createMap()
+                                value.values.forEach { (lang, text) ->
+                                    localesMap.putString(lang, text)
                                 }
-                                is JSONValue.IntValue -> {
-                                    putInt("intValue", value.value)
-                                    putString("stringValue", value.value.toString())
-                                    putString("localizedString", value.value.toString())
-                                }
-                                is JSONValue.DoubleValue -> {
-                                    putDouble("doubleValue", value.value)
-                                    putString("stringValue", value.value.toString())
-                                    putString("localizedString", value.value.toString())
-                                }
-                                is JSONValue.BoolValue -> {
-                                    putBoolean("boolValue", value.value)
-                                    putString("stringValue", value.value.toString())
-                                    putString("localizedString", value.value.toString())
-                                }
-                                is JSONValue.LocalizedStringValue -> {
-                                    val localizedValue = value.localizedString
-                                    putString("localizedString", localizedValue)
-                                    putString("stringValue", localizedValue)
-                                    // Also put the raw localized values
-                                    val localesMap = Arguments.createMap()
-                                    value.values.forEach { (lang, text) ->
-                                        localesMap.putString(lang, text)
-                                    }
-                                    putMap("localizedValues", localesMap)
-                                }
-                                is JSONValue.NullValue -> {
-                                    putNull("stringValue")
-                                    putNull("localizedString")
-                                }
+                                valueMap.putMap("values", localesMap)
+                                
+                                dataMap.putMap(key, valueMap)
+                            }
+                            is JSONValue.NullValue -> {
+                                valueMap.putNull("stringValue")
+                                valueMap.putNull("localizedString")
+                                dataMap.putMap(key, valueMap)
                             }
                         }
-                        dataMap.putMap(key, valueMap)
                     }
                     putMap("data", dataMap)
                 }
