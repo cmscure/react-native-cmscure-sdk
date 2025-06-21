@@ -1,8 +1,8 @@
 import Foundation
 import React
 
-@objc(CMSCureSDK) 
-class CMSCureSDKModule: RCTEventEmitter {
+@objc(CMSCureSDK)
+class CMSCureSDK: RCTEventEmitter {
     
     private var hasListeners = false
     private var contentUpdateObserver: NSObjectProtocol?
@@ -16,6 +16,11 @@ class CMSCureSDKModule: RCTEventEmitter {
         if let observer = contentUpdateObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    @objc
+    override static func moduleName() -> String! {
+        return "CMSCureSDK"
     }
     
     // MARK: - RCTEventEmitter

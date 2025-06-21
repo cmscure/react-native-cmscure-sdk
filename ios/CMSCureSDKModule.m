@@ -56,4 +56,9 @@ RCT_EXTERN_METHOD(sync:(NSString *)screenName
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
++ (BOOL)requiresMainQueueSetup
+{
+    return YES;
+}
+
 @end
