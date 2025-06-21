@@ -4,7 +4,7 @@ require "json"
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
-  s.name         = "react-native-cmscure-sdk"
+  s.name         = "CMSCureSDK"
   s.version      = package["version"]
   s.summary      = package["description"]
   s.homepage     = "https://github.com/cmscure/react-native-cmscure-sdk"
@@ -14,6 +14,7 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/cmscure/react-native-cmscure-sdk.git", :tag => "#{s.version}" }
 
   s.source_files  = "ios/**/*.{h,m,mm,swift}"
+  s.requires_arc = true
 
   # Dependencies
   s.dependency "React-Core"
