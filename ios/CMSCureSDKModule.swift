@@ -18,9 +18,6 @@ class CMSCureSDKModule: NSObject, RCTBridgeModule {
         }
     }
 
-    static func requiresMainQueueSetup() -> Bool {
-        return true
-    }
 
     static func moduleName() -> String! {
         return "\(self)"
@@ -212,6 +209,10 @@ class CMSCureSDKModule: NSObject, RCTBridgeModule {
         CMSCureSDK.shared.sync(screenName: screenName) { success in
             resolver(success)
         }
+    }
+
+    static func requiresMainQueueSetup() -> Bool {
+        return true
     }
 }
 
