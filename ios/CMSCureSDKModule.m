@@ -8,7 +8,7 @@
 // Ensure every RCT_EXTERN_METHOD here has a corresponding @objc func in the Swift file.
 
 // The name used here is what you import in JS. Let's rename it to "CMSCureSDK" to match index.js
-@interface RCT_EXTERN_MODULE(CMSCureSDK, RCTEventEmitter) // Corrected Name
+@interface RCT_EXTERN_MODULE(CMSCureSDKModule, RCTEventEmitter) // Corrected Name
 
 // MARK: - Configuration Methods
 

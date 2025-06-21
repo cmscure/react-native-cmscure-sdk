@@ -1,7 +1,7 @@
 import Foundation
 import React
 
-@objc(CMSCureSDKModule)
+@objc(CMSCureSDK) 
 class CMSCureSDKModule: RCTEventEmitter {
     
     private var hasListeners = false
