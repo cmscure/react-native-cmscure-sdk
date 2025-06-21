@@ -2,7 +2,7 @@ import Foundation
 import React
 
 @objc(CMSCureSDKModule)
-class CMSCureSDKModule: RCTEventEmitter {
+class CMSCureSDKModule: NSObject, RCTBridgeModule {
     
     private var hasListeners = false
     private var contentUpdateObserver: NSObjectProtocol?
@@ -18,9 +18,12 @@ class CMSCureSDKModule: RCTEventEmitter {
         }
     }
 
-    @objc
-    override static func moduleName() -> String! {
-        return "CMSCureSDKModule"
+    static func requiresMainQueueSetup() -> Bool {
+        return true
+    }
+
+    static func moduleName() -> String! {
+        return "\(self)"
     }
     
     // MARK: - RCTEventEmitter

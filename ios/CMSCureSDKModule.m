@@ -1,11 +1,9 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 #import "React/RCTBridgeModule.h"
+#import "CMSCureSDKModule.h"
 
-
-// The Swift class is named "CMSCureSDKModule" but has @objc(CMSCureSDK)
-// So we need to use CMSCureSDK here, not CMSCureSDKModule
-@interface RCT_EXTERN_MODULE(CMSCureSDKModule, RCTEventEmitter)
+@interface RCT_EXTERN_MODULE(CMSCureSDKModule, NSObject)
 
 // MARK: - Configuration Methods
 
