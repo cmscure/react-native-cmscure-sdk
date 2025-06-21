@@ -1,159 +1,215 @@
 import Foundation
-import CMSCureSDK // Assuming your native SDK is available as a module
+import React
 
 @objc(CMSCureSDKModule)
 class CMSCureSDKModule: RCTEventEmitter {
-
+    
+    private var hasListeners = false
+    private var contentUpdateObserver: NSObjectProtocol?
+    
     override init() {
         super.init()
-        // Listen for the unified notification from the native SDK
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleContentUpdated(notification:)),
-            name: .translationsUpdated, // This is the single notification now
-            object: nil
-        )
+        setupContentUpdateListener()
     }
-
-    private static let CONTENT_UPDATED_EVENT = "onContentUpdated"
-
-    @objc(handleContentUpdated:)
-    private func handleContentUpdated(notification: Notification) {
-        // The native SDK now sends a single notification type.
-        // We can inspect the userInfo to see what changed.
-        guard let userInfo = notification.userInfo,
-              let identifier = userInfo["screenName"] as? String else {
-            // If no specific identifier, assume a full sync
-            sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: ["type": "fullSync"])
-            return
+    
+    deinit {
+        if let observer = contentUpdateObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
-
-        var eventPayload: [String: Any] = ["identifier": identifier]
-
-        if identifier == "__colors__" {
-            eventPayload["type"] = "colors"
-        } else if identifier == "__images__" {
-            eventPayload["type"] = "images"
-        } else if Cure.shared.getStoreItems(for: identifier).count > 0 || identifier.contains("store") { // Heuristic
-            eventPayload["type"] = "dataStore"
-        } else {
-            eventPayload["type"] = "translations"
-        }
-        
-        sendEvent(withName: CMSCureSDKModule.CONTENT_UPDATED_EVENT, body: eventPayload)
     }
-
+    
+    // MARK: - RCTEventEmitter
+    
     override func supportedEvents() -> [String]! {
-        return [CMSCureSDKModule.CONTENT_UPDATED_EVENT]
+        return ["CMSCureContentUpdate"]
     }
-
+    
+    override func startObserving() {
+        hasListeners = true
+    }
+    
+    override func stopObserving() {
+        hasListeners = false
+    }
+    
     override static func requiresMainQueueSetup() -> Bool {
-        return false // Configuration can happen in the background
+        return true
     }
-
-    @objc(configure:apiKey:projectSecret:resolver:rejecter:)
-    func configure(projectId: String, apiKey: String, projectSecret: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        print("[CMSCureSDKModule] Configuring with Project ID: \(projectId)")
-        Cure.shared.configure(projectId: projectId, apiKey: apiKey, projectSecret: projectSecret)
-        Cure.shared.startListening()
-        resolve("Configuration initiated.")
-    }
-
-    @objc(setLanguage:resolver:rejecter:)
-    func setLanguage(languageCode: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        print("[CMSCureSDKModule] Setting language to: \(languageCode)")
-        Cure.shared.setLanguage(languageCode) {
-            print("[CMSCureSDKModule] Set language completion for \(languageCode).")
-            resolve("Language set to \(languageCode).")
-        }
-    }
-
-    // ... The rest of the methods are unchanged ...
-    @objc(getLanguage:rejecter:)
-    func getLanguage(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let lang = Cure.shared.getLanguage()
-        print("[CMSCureSDKModule] getLanguage returning: '\(lang)'")
-        resolve(lang)
-    }
-
-    @objc(availableLanguages:rejecter:)
-    func availableLanguages(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        Cure.shared.availableLanguages { languages in
-            print("[CMSCureSDKModule] availableLanguages returning: \(languages)")
-            resolve(languages)
-        }
-    }
-
-    @objc(translation:inTab:resolver:rejecter:)
-    func translation(for key: String, inTab tab: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let value = Cure.shared.translation(for: key, inTab: tab)
-        resolve(value)
-    }
-
-    @objc(colorValue:resolver:rejecter:)
-    func colorValue(for key: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let value = Cure.shared.colorValue(for: key)
-        resolve(value)
-    }
-
-    @objc(imageUrl:inTab:resolver:rejecter:)
-    func imageUrl(for key: String, inTab tab: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let url = Cure.shared.imageUrl(for: key, inTab: tab)?.absoluteString
-        resolve(url)
-    }
-
-    @objc(imageURL:resolver:rejecter:)
-    func imageURL(forKey key: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let url = Cure.shared.imageURL(forKey: key)?.absoluteString
-        resolve(url)
-    }
-
-    @objc(sync:resolver:rejecter:)
-    func sync(screenName: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        Cure.shared.sync(screenName: screenName) { success in
-            if success {
-                resolve(true)
-            } else {
-                let error = NSError(domain: "CMSCureSDK", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sync failed for screen: \(screenName)"])
-                reject("sync_failed", "Sync failed for screen: \(screenName)", error)
+    
+    // MARK: - Content Update Handling
+    
+    private func setupContentUpdateListener() {
+        contentUpdateObserver = NotificationCenter.default.addObserver(
+            forName: .translationsUpdated,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self, self.hasListeners else { return }
+            
+            if let userInfo = notification.userInfo,
+               let screenName = userInfo["screenName"] as? String {
+                
+                let updateType: String
+                switch screenName {
+                case CMSCureSDK.ALL_SCREENS_UPDATED:
+                    updateType = "all"
+                case CMSCureSDK.COLORS_UPDATED:
+                    updateType = "colors"
+                case CMSCureSDK.IMAGES_UPDATED:
+                    updateType = "images"
+                default:
+                    // Check if it's a datastore
+                    if screenName.contains("store") {
+                        updateType = "dataStore"
+                    } else {
+                        updateType = "translation"
+                    }
+                }
+                
+                self.sendEvent(withName: "CMSCureContentUpdate", body: [
+                    "type": updateType,
+                    "identifier": screenName
+                ])
             }
         }
     }
-
-    @objc(getStoreItems:resolver:rejecter:)
-    func getStoreItems(apiIdentifier: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        let items = Cure.shared.getStoreItems(for: apiIdentifier).map { $0.toDictionary() }
-        resolve(items)
+    
+    // MARK: - Bridge Methods
+    
+    @objc func configure(_ projectId: String,
+                        apiKey: String,
+                        projectSecret: String,
+                        resolver: @escaping RCTPromiseResolveBlock,
+                        rejecter: @escaping RCTPromiseRejectBlock) {
+        CMSCureSDK.shared.configure(
+            projectId: projectId,
+            apiKey: apiKey,
+            projectSecret: projectSecret
+        )
+        resolver(true)
     }
-
-    @objc(syncStore:resolver:rejecter:)
-    func syncStore(apiIdentifier: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-        Cure.shared.syncStore(apiIdentifier: apiIdentifier) { success in
-            resolve(success)
+    
+    @objc func setLanguage(_ languageCode: String,
+                          resolver: @escaping RCTPromiseResolveBlock,
+                          rejecter: @escaping RCTPromiseRejectBlock) {
+        CMSCureSDK.shared.setLanguage(languageCode) {
+            resolver(true)
         }
-    }    
-}
-
-// Add a helper to convert DataStoreItem to a Dictionary for React Native
-extension DataStoreItem {
-    func toDictionary() -> [String: Any] {
-        return [
-            "id": self.id,
-            "data": self.data.mapValues { $0.toDictionary() },
-            "createdAt": self.createdAt,
-            "updatedAt": self.updatedAt,
-        ]
+    }
+    
+    @objc func getLanguage(_ resolver: @escaping RCTPromiseResolveBlock,
+                          rejecter: @escaping RCTPromiseRejectBlock) {
+        let language = CMSCureSDK.shared.getLanguage()
+        resolver(language)
+    }
+    
+    @objc func availableLanguages(_ resolver: @escaping RCTPromiseResolveBlock,
+                                 rejecter: @escaping RCTPromiseRejectBlock) {
+        CMSCureSDK.shared.availableLanguages { languages in
+            resolver(languages)
+        }
+    }
+    
+    @objc func translation(_ key: String,
+                          tab: String,
+                          resolver: @escaping RCTPromiseResolveBlock,
+                          rejecter: @escaping RCTPromiseRejectBlock) {
+        let value = CMSCureSDK.shared.translation(for: key, inTab: tab)
+        resolver(value.isEmpty ? nil : value)
+    }
+    
+    @objc func colorValue(_ key: String,
+                         resolver: @escaping RCTPromiseResolveBlock,
+                         rejecter: @escaping RCTPromiseRejectBlock) {
+        let value = CMSCureSDK.shared.colorValue(for: key)
+        resolver(value)
+    }
+    
+    @objc func imageURL(_ key: String,
+                       resolver: @escaping RCTPromiseResolveBlock,
+                       rejecter: @escaping RCTPromiseRejectBlock) {
+        let url = CMSCureSDK.shared.imageURL(forKey: key)
+        resolver(url?.absoluteString)
+    }
+    
+    @objc func getStoreItems(_ apiIdentifier: String,
+                            resolver: @escaping RCTPromiseResolveBlock,
+                            rejecter: @escaping RCTPromiseRejectBlock) {
+        let items = CMSCureSDK.shared.getStoreItems(for: apiIdentifier)
+        let mappedItems = items.map { item -> [String: Any] in
+            var result: [String: Any] = [
+                "id": item.id,
+                "createdAt": item.createdAt,
+                "updatedAt": item.updatedAt,
+                "is_active": item.data["is_active"]?.boolValue ?? true
+            ]
+            
+            // Map the data
+            var dataMap: [String: Any] = [:]
+            for (key, value) in item.data {
+                var valueMap: [String: Any] = [:]
+                
+                switch value {
+                case .string(let str):
+                    valueMap["stringValue"] = str
+                    valueMap["localizedString"] = str
+                    
+                case .int(let num):
+                    valueMap["intValue"] = num
+                    valueMap["stringValue"] = String(num)
+                    valueMap["localizedString"] = String(num)
+                    
+                case .double(let num):
+                    valueMap["doubleValue"] = num
+                    valueMap["stringValue"] = String(num)
+                    valueMap["localizedString"] = String(num)
+                    
+                case .bool(let bool):
+                    valueMap["boolValue"] = bool
+                    valueMap["stringValue"] = String(bool)
+                    valueMap["localizedString"] = String(bool)
+                    
+                case .localizedObject(let dict):
+                    let localizedValue = dict[CMSCureSDK.shared.getLanguage()] ?? dict["en"] ?? dict.values.first ?? ""
+                    valueMap["localizedString"] = localizedValue
+                    valueMap["stringValue"] = localizedValue
+                    valueMap["values"] = dict
+                    
+                case .null:
+                    valueMap["stringValue"] = NSNull()
+                    valueMap["localizedString"] = NSNull()
+                }
+                
+                dataMap[key] = valueMap
+            }
+            
+            result["data"] = dataMap
+            return result
+        }
+        
+        resolver(mappedItems)
+    }
+    
+    @objc func syncStore(_ apiIdentifier: String,
+                        resolver: @escaping RCTPromiseResolveBlock,
+                        rejecter: @escaping RCTPromiseRejectBlock) {
+        CMSCureSDK.shared.syncStore(apiIdentifier: apiIdentifier) { success in
+            resolver(success)
+        }
+    }
+    
+    @objc func sync(_ screenName: String,
+                   resolver: @escaping RCTPromiseResolveBlock,
+                   rejecter: @escaping RCTPromiseRejectBlock) {
+        CMSCureSDK.shared.sync(screenName: screenName) { success in
+            resolver(success)
+        }
     }
 }
 
-extension JSONValue {
-    func toDictionary() -> [String: Any?] {
-        var dict: [String: Any?] = [:]
-        dict["stringValue"] = self.stringValue
-        dict["intValue"] = self.intValue
-        dict["doubleValue"] = self.doubleValue
-        dict["boolValue"] = self.boolValue
-        dict["localizedString"] = self.localizedString
-        return dict
-    }
+// MARK: - Constants Extension
+extension CMSCureSDK {
+    static let ALL_SCREENS_UPDATED = "__ALL_SCREENS_UPDATED__"
+    static let COLORS_UPDATED = "__colors__"
+    static let IMAGES_UPDATED = "__images__"
 }

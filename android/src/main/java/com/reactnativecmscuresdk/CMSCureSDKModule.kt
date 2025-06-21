@@ -39,8 +39,7 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
             CMSCureSDK.IMAGES_UPDATED -> putString("type", "images")
             else -> {
                 // Better detection for datastores
-                val knownDataStores = listOf("popular_destinations", "featured_destinations")
-                if (knownDataStores.contains(identifier)) {
+                if (identifier.contains("store")) {
                     putString("type", "dataStore")
                 } else {
                     // Try to determine by content
