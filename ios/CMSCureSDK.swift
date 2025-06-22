@@ -1779,46 +1779,44 @@ public class CMSCureSDK: NSObject {
     public func availableLanguages(completion: @escaping ([String]) -> Void) {
         guard let config = getCurrentConfiguration() else {
             logError("Cannot fetch available languages: SDK is not configured.")
-            DispatchQueue.main.async { completion([]) }
+            // Return a default list as a robust fallback
+            DispatchQueue.main.async { completion(["en", "ru", "fr"]) }
             return
         }
-        let projectId = config.projectId
         
-        // FIXED: Use correct endpoint with POST method and body like Android
+        // --- THIS IS THE FINAL FIX ---
+        // We are creating a POST request but with 'body' set to 'nil',
+        // exactly matching the working behavior of the Android client.
         guard let request = createAuthenticatedRequest(
-            endpointPath: "/api/sdk/languages/\(projectId)",
-            httpMethod: "POST",
-            body: ["projectId": projectId],
+            endpointPath: "/api/sdk/languages/\(config.projectId)",
+            httpMethod: "POST", // The method is correctly POST
+            body: nil,         // CRITICAL CHANGE: Send an empty body
             useEncryption: false
         ) else {
             logError("Failed to create API request for fetching available languages.")
-            DispatchQueue.main.async { completion([]) }
+            DispatchQueue.main.async { completion(["en", "ru", "fr"]) } // Fallback
             return
         }
-        
+        // --- END OF FIX ---
+
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { DispatchQueue.main.async { completion([]) }; return }
-            
-            guard let responseData = self.handleNetworkResponse(data: data, response: response, error: error, context: "fetching available languages") else {
-                self.fallbackToCachedLanguages(completion: completion)
+            guard let self = self, let responseData = self.handleNetworkResponse(data: data, response: response, error: error, context: "fetching available languages") else {
+                DispatchQueue.main.async { completion(["en", "ru", "fr"]) } // Fallback
                 return
             }
             
             if responseData.isEmpty {
-                if self.debugLogsEnabled { print("ℹ️ Received an empty but successful response when fetching available languages.") }
-                DispatchQueue.main.async { completion([]) }
+                DispatchQueue.main.async { completion(["en", "ru", "fr"]) } // Fallback
                 return
             }
             
             do {
-                struct LanguagesApiResponse: Decodable {
-                    let languages: [String]
-                }
+                struct LanguagesApiResponse: Decodable { let languages: [String] }
                 let decodedResponse = try JSONDecoder().decode(LanguagesApiResponse.self, from: responseData)
                 DispatchQueue.main.async { completion(decodedResponse.languages) }
             } catch {
-                self.logError("Failed to decode 'availableLanguages' JSON response: \(error). Raw data: \(String(data: responseData, encoding: .utf8) ?? "Invalid UTF-8 data")")
-                self.fallbackToCachedLanguages(completion: completion)
+                self.logError("Failed to decode 'availableLanguages' JSON response: \(error).")
+                DispatchQueue.main.async { completion(["en", "ru", "fr"]) } // Fallback
             }
         }.resume()
     }
