@@ -60,7 +60,7 @@ android {
 
 dependencies {
     // React Native
-    implementation 'com.facebook.react:react-native:+'
+    compileOnly 'com.facebook.react:react-native:+'
     
     // Kotlin
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$rootProject.ext.kotlinVersion"

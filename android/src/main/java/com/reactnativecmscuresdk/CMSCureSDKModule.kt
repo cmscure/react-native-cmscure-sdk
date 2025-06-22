@@ -144,9 +144,13 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     fun getStoreItems(apiIdentifier: String, promise: Promise) {
         try {
             val items = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier)
+            val activeItems = items.filter { item ->
+                // Keep item if 'is_active' is not explicitly false. Defaults to true if key is missing.
+                item.data["is_active"]?.boolValue != false
+            }
             val array = Arguments.createArray()
             
-            items.forEach { item ->
+            activeItems.forEach { item ->
                 val map = Arguments.createMap().apply {
                     putString("id", item.id)
                     putString("createdAt", item.createdAt)
@@ -220,10 +224,17 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
     
     @ReactMethod
     fun syncStore(apiIdentifier: String, promise: Promise) {
+        // This now has a completion handler to wait for the async operation
         CMSCureSDK.syncStore(apiIdentifier) { success ->
-            promise.resolve(success)
+            if (success) {
+                // After a successful sync, immediately get the newly cached and filtered items
+                // and resolve the promise with that data, just like iOS.
+                this.getStoreItems(apiIdentifier, promise)
+            } else {
+                promise.reject("SYNC_STORE_FAILED", "Failed to sync data store on Android")
+            }
         }
-    }
+}
     
     @ReactMethod
     fun sync(screenName: String, promise: Promise) {

@@ -2,7 +2,7 @@ import {
   NativeModules, 
   NativeEventEmitter, 
   Platform,
-  Image 
+  Image, View, ActivityIndicator
 } from 'react-native';
 import React, { 
   createContext, 
@@ -52,96 +52,54 @@ export const Cure = {
 // Provider component
 export const CMSCureProvider = ({ children, config }) => {
   const [isInitialized, setIsInitialized] = useState(false);
-  const [, forceUpdate] = useState({});
   
-  // Use refs for data that shouldn't trigger re-renders
   const dataStoresRef = useRef({});
   const updateCounterRef = useRef(0);
+  const forceUpdate = useState({})[1]; // A function to force re-render
 
   useEffect(() => {
-    let subscription;
     let isMounted = true;
     
     const initializeSDK = async () => {
+      // Ensure config is provided before trying to initialize
       if (config && isMounted) {
         try {
-          console.log('Initializing CMSCure SDK...');
+          console.log('CMSCureProvider: Initializing SDK...');
           await Cure.configure(config);
           
-          // Initial sync of critical data
+          // Perform initial critical syncs
           await Promise.all([
             Cure.sync('__colors__'),
             Cure.sync('__images__'),
-            Cure.sync('common_config'),
-            Cure.sync('home_screen')
+            Cure.sync('common_config') // Example critical tab
           ]);
           
-          // Initial fetch of known data stores
-          const knownStores = ['popular_destinations', 'featured_destinations'];
-          for (const store of knownStores) {
-            try {
-              await Cure.syncStore(store);
-              const items = await Cure.getStoreItems(store);
-              dataStoresRef.current[store] = {
-                items,
-                lastFetch: Date.now()
-              };
-            } catch (err) {
-              console.log(`Initial fetch of ${store} failed:`, err);
-            }
-          }
-          
           if (isMounted) {
-            setIsInitialized(true);
-            forceUpdate({});
+            console.log('CMSCureProvider: SDK Initialized successfully.');
+            setIsInitialized(true); // <-- This unlocks the rest of the app
           }
         } catch (error) {
-          console.error('Failed to initialize CMSCure SDK:', error);
+          console.error('CMSCureProvider: Failed to initialize CMSCure SDK:', error);
+          // You could handle this error state, maybe show a permanent error screen
         }
       }
     };
 
     initializeSDK();
 
-    // Set up event listener
-    subscription = eventEmitter.addListener('CMSCureContentUpdate', async (event) => {
+    const subscription = eventEmitter.addListener('CMSCureContentUpdate', (event) => {
       if (!isMounted) return;
-      
-      console.log('Content update received:', event);
-      
-      const { type, identifier } = event;
-      
-      // Handle data store updates
-      if (type === 'dataStore' && identifier) {
-        try {
-          // Always fetch fresh data on update
-          await Cure.syncStore(identifier);
-          const items = await Cure.getStoreItems(identifier);
-          
-          // Update the ref with fresh data
-          dataStoresRef.current[identifier] = {
-            items,
-            lastFetch: Date.now()
-          };
-          
-          // Force all components to re-render
-          updateCounterRef.current += 1;
-          forceUpdate({});
-        } catch (err) {
-          console.error(`Failed to fetch datastore ${identifier}:`, err);
-        }
-      } else {
-        // For other updates, increment counter
-        updateCounterRef.current += 1;
-        forceUpdate({});
-      }
+      console.log('CMSCureProvider: Content update received:', event);
+      // Store the identifier of the content that was updated
+      updateCounterRef.current = { id: event.identifier, time: Date.now() };
+      forceUpdate(c => !c);
     });
 
     return () => {
       isMounted = false;
       subscription?.remove();
     };
-  }, [config]);
+  }, [config]); // This effect runs only when the config object changes
 
   const contextValue = useMemo(() => ({
     isInitialized,
@@ -149,6 +107,18 @@ export const CMSCureProvider = ({ children, config }) => {
     updateCounter: updateCounterRef.current
   }), [isInitialized, updateCounterRef.current]);
 
+  // --- THE GATEKEEPER LOGIC ---
+  if (!isInitialized) {
+    // While the SDK is configuring, show a loading screen.
+    // This prevents the rest of the app from running too early.
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  // Once initialized, render the actual app
   return (
     <CMSCureContext.Provider value={contextValue}>
       {children}
@@ -163,7 +133,7 @@ const useCMSCureContext = () => {
     throw new Error('useCMSCure hooks must be used within CMSCureProvider');
   }
   return context;
-};
+}; 
 
 // Hook for translations
 export const useCureString = (key, tab, defaultValue = '') => {
@@ -251,57 +221,60 @@ export const useCureImage = (key, tab = null) => {
 
 // Hook for data stores
 export const useCureDataStore = (apiIdentifier) => {
-  const { dataStores, updateCounter } = useCMSCureContext();
-  const [state, setState] = useState({ items: [], isLoading: true });
+  const { updateCounter } = useCMSCureContext();
+  const [state, setState] = useState({ 
+    items: [], 
+    isLoading: true 
+  });
 
+  // This effect now handles BOTH initial fetch and live updates.
   useEffect(() => {
-    let mounted = true;
+    let isMounted = true;
 
-    const fetchData = async () => {
+    const syncAndSetData = async () => {
+      if (isMounted) {
+        setState(s => ({ ...s, isLoading: true }));
+      }
       try {
-        // Check if we have recent data
-        const cached = dataStores[apiIdentifier];
-        if (cached && cached.items) {
-          setState({ items: cached.items, isLoading: false });
-          
-          // If data is older than 5 seconds, refresh it
-          if (Date.now() - cached.lastFetch > 5000) {
-            const freshItems = await Cure.getStoreItems(apiIdentifier);
-            if (mounted) {
-              dataStores[apiIdentifier] = {
-                items: freshItems,
-                lastFetch: Date.now()
-              };
-              setState({ items: freshItems, isLoading: false });
-            }
-          }
-        } else {
-          // No cache, fetch fresh
-          await Cure.syncStore(apiIdentifier);
-          const freshItems = await Cure.getStoreItems(apiIdentifier);
-          
-          if (mounted) {
-            dataStores[apiIdentifier] = {
-              items: freshItems,
-              lastFetch: Date.now()
-            };
-            setState({ items: freshItems, isLoading: false });
-          }
+        const freshItems = await Cure.syncStore(apiIdentifier);
+        if (isMounted) {
+          setState({ items: freshItems || [], isLoading: false });
         }
       } catch (error) {
-        console.error(`Failed to fetch datastore ${apiIdentifier}:`, error);
-        if (mounted) {
-          setState({ items: [], isLoading: false });
+        console.error(`CMSCure: Failed to sync '${apiIdentifier}':`, error);
+        if (isMounted) {
+          // On failure, try to get from cache, then settle.
+          const cachedItems = await Cure.getStoreItems(apiIdentifier);
+          setState({ items: cachedItems || [], isLoading: false });
         }
       }
     };
 
-    fetchData();
+    const refreshFromCache = async () => {
+       try {
+        const cachedItems = await Cure.getStoreItems(apiIdentifier);
+        if (isMounted) {
+          setState(s => ({ ...s, items: cachedItems || [] }));
+        }
+      } catch (error) {
+        console.error(`CMSCure: Failed to refresh '${apiIdentifier}' from cache:`, error);
+      }
+    }
 
-    return () => {
-      mounted = false;
-    };
-  }, [apiIdentifier, dataStores, updateCounter]);
+    // This is the trigger logic
+    if (state.isLoading) {
+      // If it's the very first load, always sync.
+      syncAndSetData();
+    } else {
+      // For subsequent updates, only refresh if the event is for this store
+      // or if it's a global "ALL" update.
+      if (updateCounter?.id === apiIdentifier || updateCounter?.id === '__ALL_SCREENS_UPDATED__') {
+        refreshFromCache();
+      }
+    }
+
+    return () => { isMounted = false; };
+  }, [apiIdentifier, updateCounter]); // Depends on both identifier and the update event
 
   return state;
 };

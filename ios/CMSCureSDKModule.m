@@ -1,199 +1,158 @@
-//
-//  CMSCureSDKModule.m
-//  React Native bridge for CMSCureSDK
-//
+// Enhanced CMSCureSDKModule.m with better DataStore support
 
 #import "CMSCureSDKModule.h"
-#import <React/RCTBridgeModule.h>
 #import <React/RCTLog.h>
-#import "CMSCureSDK-Swift.h"  // Auto-generated Swift header
+#import "react_native_cmscure_sdk-Swift.h"
 
 @implementation CMSCureSDKModule
+{
+  BOOL hasListeners;
+}
 
-// Expose this module in JS as NativeModules.CMSCureSDK
 RCT_EXPORT_MODULE(CMSCureSDK);
 
-#pragma mark - Configuration
+- (instancetype)init {
+    if (self = [super init]) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(handleContentUpdate:)
+                                                     name:@"CMSCureTranslationsUpdatedNotification"
+                                                   object:nil];
+    }
+    return self;
+}
 
-RCT_EXPORT_METHOD(configure:(NSString *)projectId
-                  apiKey:(NSString *)apiKey
-            projectSecret:(NSString *)projectSecret
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    [CMSCureSDK.shared configureWithProjectId:projectId
-                                       apiKey:apiKey
-                                 projectSecret:projectSecret
-                                    completion:^(BOOL success) {
-      if (success) {
-        resolve(@(YES));
-      } else {
-        reject(@"configure_failed",
-               @"CMSCureSDK.configure returned false",
-               nil);
-      }
+- (void)handleContentUpdate:(NSNotification *)notification {
+  if (hasListeners) {
+    NSDictionary *userInfo = notification.userInfo;
+    NSString *screenName = userInfo[@"screenName"];
+    NSString *providedUpdateType = userInfo[@"updateType"];
+    
+    // Use the provided update type from the notification, or determine it
+    NSString *updateType = providedUpdateType;
+    if (!updateType) {
+        updateType = @"translation"; // default
+        if ([screenName containsString:@"store"]) {
+            updateType = @"dataStore";
+        } else if ([screenName isEqualToString:@"__colors__"]) {
+            updateType = @"colors";
+        } else if ([screenName isEqualToString:@"__images__"]) {
+            updateType = @"images";
+        } else if ([screenName isEqualToString:@"__ALL_SCREENS_UPDATED__"]) {
+            updateType = @"all";
+        }
+    }
+    
+    [self sendEventWithName:@"CMSCureContentUpdate" body:@{
+        @"type": updateType,
+        @"identifier": screenName ?: @""
     }];
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] configure exception: %@", ex);
-    reject(@"configure_exception", ex.reason, nil);
   }
 }
 
-#pragma mark - Language Management
+RCT_EXPORT_METHOD(configure:(NSString *)projectId
+                   apiKey:(NSString *)apiKey
+           projectSecret:(NSString *)projectSecret
+                resolver:(RCTPromiseResolveBlock)resolve
+                rejecter:(RCTPromiseRejectBlock)reject) {
+  [[CMSCureSDK shared] configureWithProjectId:projectId apiKey:apiKey projectSecret:projectSecret];
+  resolve(@(YES));
+}
 
 RCT_EXPORT_METHOD(setLanguage:(NSString *)languageCode
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-  @try {
-    [CMSCureSDK.shared setLanguage:languageCode];
-    resolve(@(YES));
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] setLanguage exception: %@", ex);
-    reject(@"setLanguage_exception", ex.reason, nil);
-  }
+  [[CMSCureSDK shared] setLanguage:languageCode];
+  resolve(@(YES));
 }
 
 RCT_EXPORT_METHOD(getLanguage:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    NSString *lang = [CMSCureSDK.shared getLanguage];
-    resolve(lang ?: @"");
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] getLanguage exception: %@", ex);
-    reject(@"getLanguage_exception", ex.reason, nil);
-  }
+                     rejecter:(RCTPromiseRejectBlock)reject) {
+  NSString *lang = [[CMSCureSDK shared] getLanguage];
+  resolve(lang ?: @"");
 }
 
 RCT_EXPORT_METHOD(availableLanguages:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    NSArray<NSString *> *langs = [CMSCureSDK.shared availableLanguages];
-    resolve(langs);
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] availableLanguages exception: %@", ex);
-    reject(@"availableLanguages_exception", ex.reason, nil);
-  }
+                             rejecter:(RCTPromiseRejectBlock)reject) {
+  [[CMSCureSDK shared] availableLanguagesWithCompletion:^(NSArray<NSString *> * languages) {
+    resolve(languages ?: @[]);
+  }];
 }
 
-#pragma mark - Content Fetching
-
 RCT_EXPORT_METHOD(translation:(NSString *)key
-                  tab:(NSString *)tab
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    NSString *value = [CMSCureSDK.shared translationForKey:key tab:tab];
-    resolve(value ?: @"");
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] translation exception: %@", ex);
-    reject(@"translation_exception", ex.reason, nil);
-  }
+                          tab:(NSString *)tab
+                     resolver:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject) {
+  NSString *value = [[CMSCureSDK shared] translationFor:key inTab:tab];
+  resolve(value ?: @"");
 }
 
 RCT_EXPORT_METHOD(colorValue:(NSString *)key
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    NSString *color = [CMSCureSDK.shared colorValueForKey:key];
-    resolve(color ?: @"");
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] colorValue exception: %@", ex);
-    reject(@"colorValue_exception", ex.reason, nil);
-  }
+                    resolver:(RCTPromiseResolveBlock)resolve
+                    rejecter:(RCTPromiseRejectBlock)reject) {
+  NSString *color = [[CMSCureSDK shared] colorValueFor:key];
+  resolve(color ?: @"");
 }
 
 RCT_EXPORT_METHOD(imageURL:(NSString *)key
                   resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    NSString *url = [CMSCureSDK.shared imageURLForKey:key];
-    resolve(url ?: @"");
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] imageURL exception: %@", ex);
-    reject(@"imageURL_exception", ex.reason, nil);
-  }
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  NSURL *url = [[CMSCureSDK shared] imageURLForKey:key];
+  resolve(url ? url.absoluteString : @"");
 }
 
-#pragma mark - Data Store Methods
-
 RCT_EXPORT_METHOD(getStoreItems:(NSString *)apiIdentifier
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
+                        resolver:(RCTPromiseResolveBlock)resolve
+                        rejecter:(RCTPromiseRejectBlock)reject)
 {
   @try {
-    NSArray *items = [CMSCureSDK.shared getStoreItemsForIdentifier:apiIdentifier];
-    resolve(items);
+    NSArray *items = [[CMSCureSDK shared] getStoreItemsForObjC:apiIdentifier];
+    resolve(items ?: @[]);
   }
   @catch (NSException *ex) {
     RCTLogError(@"[CMSCureSDK] getStoreItems exception: %@", ex);
-    reject(@"getStoreItems_exception", ex.reason, nil);
+    reject(@"getStoreItems_exception", ex.reason ?: @"Unknown error", nil);
   }
 }
 
 RCT_EXPORT_METHOD(syncStore:(NSString *)apiIdentifier
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    [CMSCureSDK.shared syncStoreForIdentifier:apiIdentifier completion:^(BOOL success) {
-      if (success) {
-        resolve(@(YES));
-      } else {
-        reject(@"syncStore_failed",
-               @"CMSCureSDK.syncStore returned false",
-               nil);
-      }
-    }];
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] syncStore exception: %@", ex);
-    reject(@"syncStore_exception", ex.reason, nil);
-  }
+                   resolver:(RCTPromiseResolveBlock)resolve
+                   rejecter:(RCTPromiseRejectBlock)reject) {
+  [[CMSCureSDK shared] syncStoreWithApiIdentifier:apiIdentifier completion:^(BOOL success, NSArray *items) {
+    if (success) {
+      resolve(items ?: @[]);
+    } else {
+      reject(@"sync_store_failed", @"Failed to sync data store on iOS", nil);
+    }
+  }];
 }
-
-#pragma mark - Sync & Cache Management
 
 RCT_EXPORT_METHOD(sync:(NSString *)screenName
-                  resolver:(RCTPromiseResolveBlock)resolve
-                  rejecter:(RCTPromiseRejectBlock)reject)
-{
-  @try {
-    [CMSCureSDK.shared syncForScreen:screenName completion:^(BOOL success) {
-      if (success) {
-        resolve(@(YES));
-      } else {
-        reject(@"sync_failed",
-               @"CMSCureSDK.sync returned false",
-               nil);
-      }
-    }];
-  }
-  @catch (NSException *ex) {
-    RCTLogError(@"[CMSCureSDK] sync exception: %@", ex);
-    reject(@"sync_exception", ex.reason, nil);
-  }
+               resolver:(RCTPromiseResolveBlock)resolve
+               rejecter:(RCTPromiseRejectBlock)reject) {
+  [[CMSCureSDK shared] syncWithScreenName:screenName completion:^(BOOL success) {
+    resolve(@(success));
+  }];
 }
 
-#pragma mark - Module Setup
+- (NSArray<NSString *> *)supportedEvents {
+  return @[@"CMSCureContentUpdate"];
+}
 
-+ (BOOL)requiresMainQueueSetup
-{
-  // Return YES if your module initialization relies on UIKit.
-  return YES;
+- (void)startObserving {
+    hasListeners = YES;
+}
+
+- (void)stopObserving {
+    hasListeners = NO;
+}
+
++ (BOOL)requiresMainQueueSetup {
+    return YES;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end

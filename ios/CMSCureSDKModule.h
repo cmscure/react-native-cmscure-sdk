@@ -1,8 +1,7 @@
 #import <React/RCTBridgeModule.h>
-#import <React/RCTEventEmitter.h>
-#import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h> // Import the EventEmitter header
 
-
-@interface CMSCureSDKModule : NSObject <RCTBridgeModule>
+// Inherit from RCTEventEmitter instead of NSObject
+@interface CMSCureSDKModule : RCTEventEmitter <RCTBridgeModule>
 
 @end

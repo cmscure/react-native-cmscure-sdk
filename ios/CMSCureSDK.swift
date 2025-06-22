@@ -38,12 +38,16 @@ public typealias Cure = CMSCureSDK
 /// - Socket Communication: Manages a WebSocket connection for receiving live updates.
 /// - Thread Safety: Uses dispatch queues to ensure thread-safe access to shared resources.
 /// - SwiftUI Integration: Provides observable objects and helpers for easy use in SwiftUI views.
-public class CMSCureSDK {
+public class CMSCureSDK: NSObject {
     // MARK: - Singleton Instance
     
     /// The shared singleton instance of the `CMSCureSDK`.
     /// Use this instance to access all SDK functionalities.
     public static let shared = CMSCureSDK()
+    
+    @objc(shared) public static func sharedInstance() -> CMSCureSDK {
+        return CMSCureSDK.shared
+    }
     
     // MARK: - Core Configuration & State
     
@@ -130,7 +134,7 @@ public class CMSCureSDK {
     /// The manager for the Socket.IO client, responsible for connection and configuration.
     private var manager: SocketManager?
     
-   
+    
     
     /// A flag indicating whether the legacy Socket.IO handshake has been acknowledged by the server.
     /// Accessed via `cacheQueue`.
@@ -153,7 +157,8 @@ public class CMSCureSDK {
     ///
     /// **Important:** The SDK is not fully operational after `init()`. The `configure()` method
     /// **MUST** be called to provide necessary credentials and URLs.
-    private init() {
+    private override init() {
+        super.init()
         self.serverURL = URL(string: serverUrlString)!
         self.socketIOUrl = URL(string: socketIOURLString)!
         
@@ -200,6 +205,7 @@ public class CMSCureSDK {
     ///                      Defaults to "https://app.cmscure.com". Must use HTTPS in production.
     ///   - socketIOURLString: The URL string for your CMSCure Socket.IO server (e.g., "wss://app.cmscure.com").
     ///                        Defaults to "wss://app.cmscure.com". Must use WSS in production.
+    @objc(configureWithProjectId:apiKey:projectSecret:)
     public func configure(projectId: String, apiKey: String, projectSecret: String) {
         // Ensure configuration parameters are valid.
         guard !projectId.isEmpty else { logError("Configuration failed: Project ID cannot be empty."); return }
@@ -391,8 +397,15 @@ public class CMSCureSDK {
         }
     }
     
+    @objc(setLanguage:)
+    public func setLanguageForObjC(language: String) {
+        // This calls your original, more complex Swift function internally.
+        self.setLanguage(language, force: false, completion: nil)
+    }
+    
     /// Retrieves the currently active language code.
     /// - Returns: The current language code (e.g., "en").
+    @objc
     public func getLanguage() -> String {
         // Thread-safe read of currentLanguage.
         return cacheQueue.sync { self.currentLanguage }
@@ -457,7 +470,7 @@ public class CMSCureSDK {
         if self.debugLogsEnabled { print("🧹 Cache, Tabs List, Config files, and runtime SDK configuration have been cleared.") }
         
         // Stop any active listening (socket connection).
-//        stopListening() // Disconnects socket.
+        //        stopListening() // Disconnects socket.
     }
     
     // MARK: - Public API - Content Accessors
@@ -471,6 +484,7 @@ public class CMSCureSDK {
     ///   - key: The key for the desired translation.
     ///   - screenName: The name of the tab/screen where the translation key is located.
     /// - Returns: The translated string for the current language, or an empty string if not found.
+    @objc(translationFor:inTab:)
     public func translation(for key: String, inTab screenName: String) -> String {
         return cacheQueue.sync {
             return cache[screenName]?[key]?[self.currentLanguage] ?? ""
@@ -482,62 +496,116 @@ public class CMSCureSDK {
     /// Returns an empty array if the store is not found in the cache.
     /// - Parameter apiIdentifier: The unique API identifier of the store.
     /// - Returns: An array of `DataStoreItem` objects.
-    public func getStoreItems(for apiIdentifier: String) -> [DataStoreItem] { // --- ADD THIS ENTIRE METHOD ---
+    
+    @nonobjc public func getStoreItems(for apiIdentifier: String) -> [DataStoreItem] {
         return cacheQueue.sync {
             return self.dataStoreCache[apiIdentifier] ?? []
         }
     }
     
+    @objc(getStoreItemsForObjC:)
+    public func getStoreItemsForObjC(apiIdentifier: String) -> [[String: Any]] {
+        let swiftItems = self.getStoreItems(for: apiIdentifier)
+        let activeItems = swiftItems.filter { item in
+            // Keep item if 'is_active' is true or if the key doesn't exist
+            return item.data["is_active"]?.boolValue ?? true
+        }
+        
+        return activeItems.map { item -> [String: Any] in
+            var itemDict: [String: Any] = [
+                "id": item.id,
+                "createdAt": item.createdAt,
+                "updatedAt": item.updatedAt
+            ]
+            
+            var dataDict: [String: Any] = [:]
+            for (key, jsonValue) in item.data {
+                // Here we use our new helper to do the conversion safely!
+                if let value = jsonValue.objcReadyValue {
+                    dataDict[key] = value
+                }
+            }
+            itemDict["data"] = dataDict
+            
+            return itemDict
+        }
+    }
+
+    
+    
     /// Fetches the latest items for a specific Data Store from the backend and updates the cache.
     /// - Parameters:
     ///   - apiIdentifier: The unique API identifier of the store to synchronize.
     ///   - completion: A closure called on the main thread with `true` on success, `false` on failure.
-    public func syncStore(apiIdentifier: String, completion: @escaping (Bool) -> Void) { // --- ADD THIS ENTIRE METHOD ---
+    @objc(syncStoreWithApiIdentifier:completion:)
+    public func syncStore(apiIdentifier: String, completion: @escaping (Bool, [[String: Any]]?) -> Void) {
         guard let config = getCurrentConfiguration() else {
             logError("Sync Store failed for '\(apiIdentifier)': SDK is not configured.")
-            DispatchQueue.main.async { completion(false) }; return
+            DispatchQueue.main.async { completion(false, nil) }; return
         }
         
-        // Use the standard authenticated request builder for the SDK endpoint
+        // FIXED: Use GET method (no body) to match backend
         guard let request = createAuthenticatedRequest(
             endpointPath: "/api/sdk/store/\(config.projectId)/\(apiIdentifier)",
-            httpMethod: "GET",
+            httpMethod: "GET", // Backend uses GET
+            body: nil,         // No body for GET
             useEncryption: false
         ) else {
             logError("Failed to create sync request for data store '\(apiIdentifier)'.")
-            DispatchQueue.main.async { completion(false) }; return
+            DispatchQueue.main.async { completion(false, nil) }; return
         }
         
-        if debugLogsEnabled { print("🔄 Syncing data store '\(apiIdentifier)'...") }
+        if debugLogsEnabled { print("🔄 Syncing data store '\(apiIdentifier)' using GET...") }
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self, let responseData = self.handleNetworkResponse(data: data, response: response, error: error, context: "syncing data store '\(apiIdentifier)'") else {
-                DispatchQueue.main.async { completion(false) }; return
+                DispatchQueue.main.async { completion(false, nil) }; return
             }
-            
-            var items: [DataStoreItem] = []
             
             do {
                 let decodedResponse = try JSONDecoder().decode(DataStoreResponse.self, from: responseData)
-                items = decodedResponse.items
+                
                 self.cacheQueue.async(flags: .barrier) {
-                    // Update the dedicated data store cache
                     self.dataStoreCache[apiIdentifier] = decodedResponse.items
                     self.saveDataStoreCacheToDisk()
+                    let activeItems = decodedResponse.items.filter { item in
+                        // Keep item if 'is_active' is true or if the key doesn't exist (defaulting to true)
+                        return item.data["is_active"]?.boolValue ?? true
+                    }
+                    
+                    let mappedItems = activeItems.map { item -> [String: Any] in
+                        var itemDict: [String: Any] = [
+                            "id": item.id,
+                            "createdAt": item.createdAt,
+                            "updatedAt": item.updatedAt
+                        ]
+                        
+                        let isActive = item.data["is_active"]?.boolValue ?? true
+                        itemDict["is_active"] = isActive
+                        
+                        var dataDict: [String: Any] = [:]
+                        for (key, jsonValue) in item.data {
+                            if let value = jsonValue.objcReadyValue {
+                                dataDict[key] = value
+                            }
+                        }
+                        itemDict["data"] = dataDict
+                        
+                        return itemDict
+                    }
                     
                     DispatchQueue.main.async {
-                        if self.debugLogsEnabled { print("✅ Synced and updated cache for data store '\(apiIdentifier)'.") }
+                        if self.debugLogsEnabled { print("✅ Synced data store '\(apiIdentifier)' with \(mappedItems.count) items.") }
                         self.postTranslationsUpdatedNotification(screenName: apiIdentifier)
-                        completion(true)
+                        completion(true, mappedItems)
                     }
                 }
             } catch {
                 self.logError("Failed to decode data store response for '\(apiIdentifier)': \(error)")
-                DispatchQueue.main.async { completion(false) }
+                DispatchQueue.main.async { completion(false, nil) }
             }
         }.resume()
     }
-    
     /// Retrieves a color hex string for a given global color key.
     ///
     /// Colors are typically stored in a special tab named `__colors__`.
@@ -545,6 +613,8 @@ public class CMSCureSDK {
     ///
     /// - Parameter key: The key for the desired color.
     /// - Returns: The color hex string (e.g., "#RRGGBB") or `nil` if not found.
+    
+    @objc(colorValueFor:)
     public func colorValue(for key: String) -> String? {
         return cacheQueue.sync {
             return cache["__colors__"]?[key]?["color"]
@@ -568,6 +638,7 @@ public class CMSCureSDK {
     }
     
     /// Retrieves a URL for a globally managed image asset from the central image library.
+    @objc(imageURLForKey:)
     public func imageURL(forKey: String) -> URL? {
         let urlString = cacheQueue.sync {
             // Global images are stored in the "__images__" virtual tab.
@@ -660,11 +731,11 @@ public class CMSCureSDK {
         // --- Set Standard Headers ---
         request.setValue("application/json", forHTTPHeaderField: "Accept") // Expect JSON responses.
         request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")         // Always include the API Key header.
-        
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // --- Handle Request Body (Serialization and Optional Encryption) ---
         var httpBodyData: Data? = nil
         if let requestBodyPayload = body, ["POST", "PUT", "PATCH"].contains(httpMethod.uppercased()) {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type") // Indicate JSON body.
+             // Indicate JSON body.
             
             if useEncryption {
                 // Encrypt body using legacy method (requires symmetricKey).
@@ -710,30 +781,33 @@ public class CMSCureSDK {
             logError("Network error encountered while \(context): \(networkError.localizedDescription)")
             return nil
         }
-        
+
         // 2. Ensure the response is an HTTPURLResponse.
         guard let httpResponse = response as? HTTPURLResponse else {
             logError("Invalid response type received while \(context). Expected HTTPURLResponse, got \(type(of: response)).")
             return nil
         }
         
+        // --- NEW DIAGNOSTIC LOG ---
+        // This will print the status code for every network request, telling us exactly
+        // what the server is sending back for the data store requests on iOS.
+        print("➡️ [CMSCureSDK Network Response] Context: \(context) | URL: \(httpResponse.url?.absoluteString ?? "N/A") | Status Code: \(httpResponse.statusCode)")
+        // --- END OF NEW LOG ---
+
         // 3. Handle specific status codes.
-        //    - For "syncing" operations, a 404 (Not Found) is treated as a successful response indicating no content for that tab.
         if httpResponse.statusCode == 404 && context.lowercased().contains("syncing") {
             if debugLogsEnabled { print("ℹ️ Sync info for \(context): Resource not found (404). Treating as successful with no new data.") }
             return Data() // Return empty Data to signify "success, but no content".
         }
         
-        //    - Check for other successful (2xx) status codes.
+        // 4. Check for other successful (2xx) status codes.
         guard (200...299).contains(httpResponse.statusCode) else {
-            // Attempt to get more error details from the response body.
             let responseBodyString = data.flatMap { String(data: $0, encoding: .utf8) } ?? "No response body available."
             logError("HTTP error encountered while \(context): Status Code \(httpResponse.statusCode). Body: \(responseBodyString)")
             return nil
         }
         
-        // 4. Handle successful responses (2xx).
-        //    If data is nil but status is 2xx (e.g., 204 No Content, or 200 OK with empty body), return empty Data.
+        // 5. Handle successful responses (2xx) with no actual data.
         guard let responseData = data else {
             if debugLogsEnabled { print("ℹ️ Received successful response (Status \(httpResponse.statusCode)) with no data body while \(context).") }
             return Data()
@@ -756,12 +830,21 @@ public class CMSCureSDK {
     ///   - screenName: The name of the tab/screen to synchronize.
     ///   - completion: A closure called on the main thread with `true` if synchronization and cache update
     ///                 were successful, `false` otherwise.
+    @objc(syncWithScreenName:completion:)
     public func sync(screenName: String, completion: @escaping (Bool) -> Void) {
-        if screenName == "__images__" {
-            // Route to the new image syncing logic.
+        // Check if this is a data store identifier
+        let isDataStore = cacheQueue.sync { knownDataStoreIdentifiers.contains(screenName) }
+        
+        if isDataStore {
+            // Route to data store sync
+            syncStore(apiIdentifier: screenName) { success, _ in
+                completion(success)
+            }
+        } else if screenName == "__images__" {
+            // Route to images sync
             syncImages(completion: completion)
         } else {
-            // Use existing logic for translations and colors.
+            // Route to translations sync
             syncTranslations(screenName: screenName, completion: completion)
         }
     }
@@ -961,55 +1044,40 @@ public class CMSCureSDK {
             return
         }
         
-        // --- Check for Encryption Prerequisites (if sync requires encrypted request bodies) ---
-        let syncRequestRequiresEncryption = true // TODO: Make this configurable or dynamic based on endpoint.
-        var canPerformEncryptedSync = true
-        if syncRequestRequiresEncryption {
-            // Safely check if the symmetric key (needed for encryption) is available.
-            cacheQueue.sync { canPerformEncryptedSync = self.symmetricKey != nil }
-        }
-        
-        guard canPerformEncryptedSync else {
-            if debugLogsEnabled { print("ℹ️ Skipping syncIfOutdated: Missing symmetric key required for encrypted sync requests.") }
-            return
-        }
-        
-        // --- Determine Tabs to Sync ---
-        // Combine tabs currently in cache with the list of known (potentially offline) project tabs.
-        // Exclude any internal/special tabs that shouldn't be synced via the standard translations endpoint.
         let regularTabsToSync = cacheQueue.sync {
             Array(Set(self.cache.keys).union(self.knownProjectTabs))
-                .filter { !$0.starts(with: "__") } // Example: Exclude tabs like "__colors__" from this generic list.
+                .filter { !$0.starts(with: "__") }
         }
-        let specialTabsToSync = ["__colors__", "__images__"] // Always sync the special colors tab and images tab.
+        let specialTabsToSync = ["__colors__", "__images__"]
+        let dataStoresToSync = cacheQueue.sync { Array(self.knownDataStoreIdentifiers) }
         
-        let allTabsToSync = Set(regularTabsToSync + specialTabsToSync) // Use a Set to avoid duplicates.
+        let allTabsToSync = Set(regularTabsToSync + specialTabsToSync)
         
         if debugLogsEnabled {
             if !allTabsToSync.isEmpty {
-                print("🔄 Syncing all relevant tabs: \(allTabsToSync.joined(separator: ", "))")
-            } else {
-                print("ℹ️ No tabs identified for `syncIfOutdated` operation.")
+                print("🔄 Syncing tabs: \(allTabsToSync.joined(separator: ", "))")
+            }
+            if !dataStoresToSync.isEmpty {
+                print("🔄 Syncing data stores: \(dataStoresToSync.joined(separator: ", "))")
             }
         }
         
-        // --- Trigger Sync for Each Tab ---
-        // Sync operations are performed concurrently for each tab.
+        // Sync translations and special content
         for tabName in allTabsToSync {
             self.sync(screenName: tabName) { success in
-                // Optional: Log if a specific tab failed during this bulk sync.
                 if !success && self.debugLogsEnabled {
-                    print("⚠️ Failed to sync tab '\(tabName)' during `syncIfOutdated` operation.")
+                    print("⚠️ Failed to sync tab '\(tabName)' during syncIfOutdated.")
                 }
             }
         }
         
-        let storesToSync = self.cacheQueue.sync { self.knownDataStoreIdentifiers }
-        if self.debugLogsEnabled && !storesToSync.isEmpty {
-            print("🔄 Syncing all known data stores: \(storesToSync.joined(separator: ", "))")
-        }
-        for storeIdentifier in storesToSync {
-            self.syncStore(apiIdentifier: storeIdentifier) { _ in }
+        // Sync data stores
+        for storeIdentifier in dataStoresToSync {
+            self.syncStore(apiIdentifier: storeIdentifier) { success, _ in
+                if !success && self.debugLogsEnabled {
+                    print("⚠️ Failed to sync store '\(storeIdentifier)' during syncIfOutdated.")
+                }
+            }
         }
     }
     
@@ -1127,20 +1195,18 @@ public class CMSCureSDK {
         
         // Called when the socket successfully connects.
         currentActiveSocket.on(clientEvent: .connect) { [weak self] _, _ in
-            guard let self = self else { return }
-            if self.debugLogsEnabled { print("🟢✅ Socket connected successfully! SID: \(self.socket?.sid ?? "N/A")") }
-            // Reset handshake status on new connection and send handshake.
-            self.cacheQueue.async { self.handshakeAcknowledged = false }
-            self.sendHandshake(projectId: projectId) // Send the legacy handshake payload.
-        }
+                guard let self = self else { return }
+                if self.debugLogsEnabled { print("🟢✅ Socket connected! SID: \(self.socket?.sid ?? "N/A")") }
+                self.cacheQueue.async { self.handshakeAcknowledged = false }
+                self.sendHandshake(projectId: projectId)
+            }
         
         // Called when the socket disconnects.
         currentActiveSocket.on(clientEvent: .disconnect) { [weak self] data, _ in
-            guard let self = self else { return }
-            if self.debugLogsEnabled { print("🔌 Socket disconnected. Reason: \(data)") }
-            // Reset handshake status on disconnect.
-            self.cacheQueue.async { self.handshakeAcknowledged = false }
-        }
+                guard let self = self else { return }
+                if self.debugLogsEnabled { print("🔌 Socket disconnected.") }
+                self.cacheQueue.async { self.handshakeAcknowledged = false }
+            }
         
         // Called when a socket error occurs.
         currentActiveSocket.on(clientEvent: .error) { [weak self] data, _ in
@@ -1177,45 +1243,62 @@ public class CMSCureSDK {
         // --- Custom Server-Sent Events ---
         
         // Handler for the 'handshake_ack' event from the server.
-        currentActiveSocket.on("handshake_ack") { [weak self] data, ackEmitter in
-            guard let self = self else { return }
-            if self.debugLogsEnabled { print("👋 Received 'handshake_ack' from server. Data: \(data)") }
-            
-            // TODO: Optionally validate the data received with the handshake_ack if it contains useful info.
-            // For example: if let ackData = data.first as? [String: Any], ackData["status"] as? String == "ok"
-            
-            self.cacheQueue.async { self.handshakeAcknowledged = true } // Mark handshake as successful.
-            if self.debugLogsEnabled { print("🤝 Handshake successfully acknowledged by the server.") }
-            
-            self.syncIfOutdated() // Perform a content sync after successful handshake.
-        }
+        currentActiveSocket.on("handshake_ack") { [weak self] data, _ in
+                guard let self = self else { return }
+                if self.debugLogsEnabled { print("👋 Handshake acknowledged!") }
+                self.cacheQueue.async { self.handshakeAcknowledged = true }
+                self.syncIfOutdated()
+            }
         
         // Handler for the 'translationsUpdated' event, indicating content changes on the server.
         currentActiveSocket.on("translationsUpdated") { [weak self] data, _ in
-            guard let self = self else { return }
-            if self.debugLogsEnabled { print("📡 Received 'translationsUpdated' event from server. Data: \(data)") }
-            self.handleSocketTranslationUpdate(data: data) // Process the update.
-        }
-        
-        currentActiveSocket.on("dataStoreUpdated") { [weak self] data, ack in
-            guard let self = self,
-                  let payload = data[0] as? [String: Any],
-                  let storeApiIdentifier = payload["storeApiIdentifier"] as? String else {
-                return
+                guard let self = self else { return }
+                if self.debugLogsEnabled { print("📡 Received 'translationsUpdated' event") }
+                self.handleSocketUpdate(data: data, isDataStore: false)
             }
-            
-            if self.debugLogsEnabled { print("📡 Received 'dataStoreUpdated' event for store: '\(storeApiIdentifier)'. Triggering sync.") }
-            
-            // --- ENHANCEMENT 3: The socket event now triggers a sync. ---
-            // The sync function will, upon completion, post a global notification
-            // that all Cure observable objects (including CureDataStore) listen to.
-            self.syncStore(apiIdentifier: storeApiIdentifier) { success in
-                // The update is now handled automatically by the CureDataStore object's subscription.
-                // No need to manually call a specific handler here.
-            }
-        }
         
+        currentActiveSocket.on("dataStoreUpdated") { [weak self] data, _ in
+                guard let self = self else { return }
+                if self.debugLogsEnabled { print("📡 Received 'dataStoreUpdated' event") }
+                self.handleSocketUpdate(data: data, isDataStore: true)
+            }
         if debugLogsEnabled { print("👂✅ Socket event handlers setup complete.") }
+    }
+    
+    /// // Unified socket update handler
+    private func handleSocketUpdate(data: [Any], isDataStore: Bool) {
+        guard let updateInfo = data.first as? [String: Any] else {
+            if debugLogsEnabled { print("⚠️ Invalid socket event data: \(data)") }
+            return
+        }
+        
+        if isDataStore {
+            // Handle DataStore update
+            if let storeIdentifier = updateInfo["storeApiIdentifier"] as? String {
+                if debugLogsEnabled { print("🔄 Socket triggered DataStore sync for: '\(storeIdentifier)'") }
+                
+                self.syncStore(apiIdentifier: storeIdentifier) { success, _ in
+                    if self.debugLogsEnabled {
+                        print(success ? "✅ DataStore socket sync successful" : "❌ DataStore socket sync failed")
+                    }
+                }
+            }
+        } else {
+            // Handle translation/content update
+            if let screenName = updateInfo["screenName"] as? String {
+                if debugLogsEnabled { print("🔄 Socket triggered sync for: '\(screenName)'") }
+                
+                if screenName.uppercased() == "__ALL__" {
+                    self.syncIfOutdated()
+                } else {
+                    self.sync(screenName: screenName) { success in
+                        if self.debugLogsEnabled {
+                            print(success ? "✅ Content socket sync successful" : "❌ Content socket sync failed")
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /// Sends the encrypted handshake message to the Socket.IO server.
@@ -1288,22 +1371,30 @@ public class CMSCureSDK {
     ///
     /// - Parameter data: The data array received with the socket event. Expected to contain a dictionary.
     private func handleSocketTranslationUpdate(data: [Any]) {
-        guard let updateInfo = data.first as? [String: Any],
-              let screenNameToUpdate = updateInfo["screenName"] as? String else {
-            if self.debugLogsEnabled { print("⚠️ Invalid data format for 'translationsUpdated' socket event: \(data)") }
+        guard let updateInfo = data.first as? [String: Any] else {
+            if self.debugLogsEnabled { print("⚠️ Invalid data format for socket event: \(data)") }
             return
         }
         
-        if self.debugLogsEnabled { print("📡 Processing 'translationsUpdated' event for tab: '\(screenNameToUpdate)'") }
-        
-        if screenNameToUpdate.uppercased() == "__ALL__" {
-            // If "__ALL__" is received, trigger a sync for all outdated tabs.
-            self.syncIfOutdated()
-        } else {
-            // Sync only the specific tab mentioned in the update.
-            self.sync(screenName: screenNameToUpdate) { success in
+        // Handle both translation and dataStore updates
+        if let screenName = updateInfo["screenName"] as? String {
+            if self.debugLogsEnabled { print("📡 Processing 'translationsUpdated' event for: '\(screenName)'") }
+            
+            if screenName.uppercased() == "__ALL__" {
+                self.syncIfOutdated()
+            } else {
+                self.sync(screenName: screenName) { success in
+                    if !success && self.debugLogsEnabled {
+                        print("⚠️ Sync failed for '\(screenName)' triggered by socket update.")
+                    }
+                }
+            }
+        } else if let storeIdentifier = updateInfo["storeApiIdentifier"] as? String {
+            if self.debugLogsEnabled { print("📡 Processing 'dataStoreUpdated' event for: '\(storeIdentifier)'") }
+            
+            self.syncStore(apiIdentifier: storeIdentifier) { success, _ in
                 if !success && self.debugLogsEnabled {
-                    print("⚠️ Sync failed for tab '\(screenNameToUpdate)' triggered by socket update.")
+                    print("⚠️ Sync failed for store '\(storeIdentifier)' triggered by socket update.")
                 }
             }
         }
@@ -1625,20 +1716,32 @@ public class CMSCureSDK {
     ///
     /// - Parameter screenName: The name of the screen/tab that was updated.
     private func postTranslationsUpdatedNotification(screenName: String) {
-        // Ensure this method is always called on the main thread.
         dispatchPrecondition(condition: .onQueue(.main))
         
-        let newRefreshToken = UUID() // Generate a new UUID to force SwiftUI updates.
-        if debugLogsEnabled { print("📬 Posting `translationsUpdated` notification for tab '\(screenName)'. New Refresh Token: \(newRefreshToken)") }
+        let newRefreshToken = UUID()
+        if debugLogsEnabled { print("📬 Posting notification for '\(screenName)'. Token: \(newRefreshToken)") }
         
-        // Update the shared bridge for SwiftUI.
         CureTranslationBridge.shared.refreshToken = newRefreshToken
         
-        // Post a traditional NotificationCenter notification.
+        // Enhanced notification with better type detection
+        var updateType = "translation"
+        if screenName.contains("store") || knownDataStoreIdentifiers.contains(screenName) {
+            updateType = "dataStore"
+        } else if screenName == "__colors__" {
+            updateType = "colors"
+        } else if screenName == "__images__" {
+            updateType = "images"
+        } else if screenName == "__ALL_SCREENS_UPDATED__" {
+            updateType = "all"
+        }
+        
         NotificationCenter.default.post(
             name: .translationsUpdated,
-            object: nil, // Sender is nil, or could be `self`.
-            userInfo: ["screenName": screenName] // Include the updated screen name.
+            object: nil,
+            userInfo: [
+                "screenName": screenName,
+                "updateType": updateType
+            ]
         )
     }
     
@@ -1672,6 +1775,7 @@ public class CMSCureSDK {
     ///
     /// - Parameter completion: A closure called on the main thread with an array of language code strings (e.g., `["en", "fr"]`).
     ///                       The array will be empty if no languages can be determined.
+    @objc(availableLanguagesWithCompletion:)
     public func availableLanguages(completion: @escaping ([String]) -> Void) {
         guard let config = getCurrentConfiguration() else {
             logError("Cannot fetch available languages: SDK is not configured.")
@@ -1680,40 +1784,32 @@ public class CMSCureSDK {
         }
         let projectId = config.projectId
         
-        // --- Create Authenticated Request (No Encryption) ---
-        // The endpoint for languages might expect projectId in the path and/or body.
-        // This example assumes projectId in path (appended) and in body. Adjust as per your API.
+        // FIXED: Use correct endpoint with POST method and body like Android
         guard let request = createAuthenticatedRequest(
-            endpointPath: "/api/sdk/languages", // Base path for the languages endpoint.
-            appendProjectIdToPath: true,         // `projectId` will be appended to the path.
-            httpMethod: "POST",                  // Assuming POST, adjust if GET or other.
-            body: ["projectId": projectId],      // Example: Send projectId in body as well.
-            useEncryption: false                 // Language list fetching does not use legacy encryption.
+            endpointPath: "/api/sdk/languages/\(projectId)",
+            httpMethod: "POST",
+            body: ["projectId": projectId],
+            useEncryption: false
         ) else {
             logError("Failed to create API request for fetching available languages.")
             DispatchQueue.main.async { completion([]) }
             return
         }
         
-        // --- Execute Network Request ---
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { DispatchQueue.main.async { completion([]) }; return }
             
             guard let responseData = self.handleNetworkResponse(data: data, response: response, error: error, context: "fetching available languages") else {
-                // If network response handling fails (e.g., network error, non-2xx status), fallback to cached languages.
                 self.fallbackToCachedLanguages(completion: completion)
                 return
             }
             
-            // Handle successful but empty response (e.g., 200 OK with no languages array).
             if responseData.isEmpty {
                 if self.debugLogsEnabled { print("ℹ️ Received an empty but successful response when fetching available languages.") }
                 DispatchQueue.main.async { completion([]) }
                 return
             }
             
-            // --- Decode JSON Response ---
-            // Expects a JSON structure like: `{"languages": ["en", "fr", "es"]}`.
             do {
                 struct LanguagesApiResponse: Decodable {
                     let languages: [String]
@@ -1722,10 +1818,9 @@ public class CMSCureSDK {
                 DispatchQueue.main.async { completion(decodedResponse.languages) }
             } catch {
                 self.logError("Failed to decode 'availableLanguages' JSON response: \(error). Raw data: \(String(data: responseData, encoding: .utf8) ?? "Invalid UTF-8 data")")
-                // Fallback to cached languages if decoding fails.
                 self.fallbackToCachedLanguages(completion: completion)
             }
-        }.resume() // Start the URLSessionDataTask.
+        }.resume()
     }
     
     /// Provides a list of languages inferred from the keys present in the local cache.
@@ -2145,7 +2240,7 @@ public final class CureDataStore: ObservableObject {
         self.items = Cure.shared.getStoreItems(for: apiIdentifier)
         
         // Automatically trigger a sync when the object is created.
-        Cure.shared.syncStore(apiIdentifier: apiIdentifier) { _ in
+        Cure.shared.syncStore(apiIdentifier: apiIdentifier) { _,_  in
             // The sink subscription below will handle the update.
             // This closure can be used for logging if needed.
         }
@@ -2237,6 +2332,46 @@ public enum JSONValue: Codable, Equatable, Hashable {
     // --- NEW CASE to handle localized strings ---
     case localizedObject([String: String])
     case null
+    
+    var objcReadyValue: Any? {
+            switch self {
+            case .string(let value):
+                // Return a map with both stringValue and localizedString for consistency
+                return [
+                    "stringValue": value,
+                    "localizedString": value
+                ]
+            case .int(let value):
+                return [
+                    "intValue": value,
+                    "stringValue": String(value),
+                    "localizedString": String(value)
+                ]
+            case .double(let value):
+                return [
+                    "doubleValue": value,
+                    "stringValue": String(value),
+                    "localizedString": String(value)
+                ]
+            case .bool(let value):
+                return [
+                    "boolValue": value,
+                    "stringValue": String(value),
+                    "localizedString": String(value)
+                ]
+            case .localizedObject(let value):
+                let currentLang = Cure.shared.getLanguage()
+                let localizedValue = value[currentLang] ?? value["en"] ?? value.values.first ?? ""
+                
+                return [
+                    "localizedString": localizedValue,
+                    "stringValue": localizedValue,
+                    "values": value
+                ]
+            case .null:
+                return NSNull()
+            }
+        }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
