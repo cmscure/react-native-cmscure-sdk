@@ -367,45 +367,42 @@ export const useCureImage = (key, tab = null) => {
 export const useCureDataStore = (apiIdentifier) => {
   const { updateCounter } = useCMSCureContext();
   const [state, setState] = useState({ items: [], isLoading: true });
-  const initialSyncDone = useRef(false);
 
+  // Initial sync — runs once per apiIdentifier, not affected by updateCounter changes.
   useEffect(() => {
     let isMounted = true;
 
     const syncAndSet = async () => {
-      if (isMounted) setState((s) => ({ ...s, isLoading: true }));
       try {
         const items = await Cure.syncStore(apiIdentifier);
         if (isMounted) setState({ items, isLoading: false });
       } catch (error) {
         console.error(`CMSCure: Failed to sync '${apiIdentifier}':`, error);
-        if (isMounted) {
+        try {
           const cached = await Cure.getStoreItems(apiIdentifier);
-          setState({ items: cached, isLoading: false });
+          if (isMounted) setState({ items: cached, isLoading: false });
+        } catch (_) {
+          if (isMounted) setState({ items: [], isLoading: false });
         }
       }
     };
 
-    const refreshFromCache = async () => {
-      try {
-        const cached = await Cure.getStoreItems(apiIdentifier);
-        if (isMounted) setState((s) => ({ ...s, items: cached }));
-      } catch (error) {
-        console.error(`CMSCure: Failed to refresh '${apiIdentifier}' from cache:`, error);
-      }
-    };
+    syncAndSet();
+    return () => { isMounted = false; };
+  }, [apiIdentifier]);
 
-    if (!initialSyncDone.current) {
-      initialSyncDone.current = true;
-      syncAndSet();
-    } else if (
+  // Refresh from cache when a real-time content update arrives for this store.
+  useEffect(() => {
+    if (
       updateCounter?.id === apiIdentifier ||
       updateCounter?.id === CMSCureConstants.ALL_SCREENS_UPDATED
     ) {
-      refreshFromCache();
+      let isMounted = true;
+      Cure.getStoreItems(apiIdentifier)
+        .then((cached) => { if (isMounted) setState((s) => ({ ...s, items: cached })); })
+        .catch(() => {});
+      return () => { isMounted = false; };
     }
-
-    return () => { isMounted = false; };
   }, [apiIdentifier, updateCounter]);
 
   return state;
