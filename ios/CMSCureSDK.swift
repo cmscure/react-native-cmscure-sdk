@@ -367,32 +367,32 @@ public class CMSCureSDK: NSObject {
     /// **Important:** The SDK is not fully operational after `init()`. The `configure()` method
     /// **MUST** be called to provide necessary credentials and URLs.
     private override init() {
-        // Safely initialize URLs with fallbacks
-        if let serverUrl = URL(string: serverUrlString) {
-            self.serverURL = serverUrl
-        } else {
-            self.logError("🆘 [CMSCureSDK Error] Invalid server URL: \(serverUrlString). Using fallback.")
-            self.serverURL = URL(string: "https://app.cmscure.com")! // Fallback URL
-        }
+        // Initialize stored properties first (before super.init)
+        self.serverURL = URL(string: serverUrlString) ?? URL(string: "https://app.cmscure.com")!
+        self.socketIOUrl = URL(string: socketIOURLString) ?? URL(string: "wss://app.cmscure.com")!
         
-        if let socketUrl = URL(string: socketIOURLString) {
-            self.socketIOUrl = socketUrl
-        } else {
+        // Must call super.init() before using self methods
+        super.init()
+        
+        // Now safe to call self methods
+        if URL(string: serverUrlString) == nil {
+            self.logError("🆘 [CMSCureSDK Error] Invalid server URL: \(serverUrlString). Using fallback.")
+        }
+        if URL(string: socketIOURLString) == nil {
             self.logError("🆘 [CMSCureSDK Error] Invalid socket URL: \(socketIOURLString). Using fallback.")
-            self.socketIOUrl = URL(string: "wss://app.cmscure.com")! // Fallback URL
         }
         
         // Safe disk loading with error handling
         loadCacheFromDisk()
-            loadDataStoreCacheFromDisk()
-            loadOfflineTabListFromDisk()
-            loadDataStoreListFromDisk()
+        loadDataStoreCacheFromDisk()
+        loadOfflineTabListFromDisk()
+        loadDataStoreListFromDisk()
         
         self.currentLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "en"
         
         if let savedLegacyConfig = readLegacyConfigFromDisk() {
-                cacheQueue.sync { self.authToken = savedLegacyConfig["authToken"] }
-            }
+            cacheQueue.sync { self.authToken = savedLegacyConfig["authToken"] }
+        }
         
         DispatchQueue.main.async {
             self.observeAppActiveNotification()

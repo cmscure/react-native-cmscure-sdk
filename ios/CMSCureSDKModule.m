@@ -2,7 +2,13 @@
 
 #import "CMSCureSDKModule.h"
 #import <React/RCTLog.h>
+
+// Support both framework (use_frameworks!) and non-framework builds
+#if __has_include(<react_native_cmscure_sdk/react_native_cmscure_sdk-Swift.h>)
+#import <react_native_cmscure_sdk/react_native_cmscure_sdk-Swift.h>
+#else
 #import "react_native_cmscure_sdk-Swift.h"
+#endif
 
 @implementation CMSCureSDKModule
 {
@@ -62,8 +68,9 @@ RCT_EXPORT_METHOD(setLanguage:(NSString *)languageCode
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-  [[CMSCureSDK shared] setLanguage:languageCode];
-  resolve(@(YES));
+  [[CMSCureSDK shared] setLanguage:languageCode force:NO completion:^{
+    resolve(@(YES));
+  }];
 }
 
 RCT_EXPORT_METHOD(getLanguage:(RCTPromiseResolveBlock)resolve
