@@ -54,7 +54,7 @@ RCT_EXPORT_METHOD(configure:(NSString *)projectId
            projectSecret:(NSString *)projectSecret
                 resolver:(RCTPromiseResolveBlock)resolve
                 rejecter:(RCTPromiseRejectBlock)reject) {
-  [[CMSCureSDK shared] configureWithProjectId:projectId apiKey:apiKey projectSecret:projectSecret];
+  [[CMSCureSDK shared] configureWithProjectId:projectId apiKey:apiKey projectSecret:projectSecret enableAutoRealTimeUpdates:YES];
   resolve(@(YES));
 }
 
@@ -118,7 +118,7 @@ RCT_EXPORT_METHOD(getStoreItems:(NSString *)apiIdentifier
 RCT_EXPORT_METHOD(syncStore:(NSString *)apiIdentifier
                    resolver:(RCTPromiseResolveBlock)resolve
                    rejecter:(RCTPromiseRejectBlock)reject) {
-  [[CMSCureSDK shared] syncStoreWithApiIdentifier:apiIdentifier completion:^(BOOL success, NSArray *items) {
+  [[CMSCureSDK shared] syncStoreForRNWithApiIdentifier:apiIdentifier completion:^(BOOL success, NSArray *items) {
     if (success) {
       resolve(items ?: @[]);
     } else {

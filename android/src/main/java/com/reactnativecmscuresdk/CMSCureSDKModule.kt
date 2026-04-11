@@ -64,9 +64,21 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
 }
     
     @ReactMethod
-    fun configure(projectId: String, apiKey: String, promise: Promise) {
+    fun configure(
+        projectId: String,
+        apiKey: String,
+        projectSecret: String,
+        enableAutoRealTimeUpdates: Boolean,
+        promise: Promise
+    ) {
         try {
-            CMSCureSDK.configure(reactContext.applicationContext, projectId, apiKey)
+            CMSCureSDK.configure(
+                context = reactContext.applicationContext,
+                projectId = projectId,
+                apiKey = apiKey,
+                projectSecret = projectSecret,
+                enableAutoRealTimeUpdates = enableAutoRealTimeUpdates
+            )
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("CONFIGURE_ERROR", e.message, e)

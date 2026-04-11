@@ -6,17 +6,7 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import coil.compose.AsyncImage
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonDeserializationContext
@@ -33,10 +23,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.collectLatest
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import retrofit2.Response
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -65,17 +55,26 @@ import android.util.Base64
 object CMSCureSDK {
 
     private const val TAG = "CMSCureSDK"
+    private const val DEFAULT_SERVER_URL = "https://gateway.cmscure.com"
+    private const val DEFAULT_SOCKET_URL = "wss://app.cmscure.com"
 
     // --- Data Classes for API & Internal Models ---
-    data class CureConfiguration(val projectId: String, val apiKey: String)
+    data class CureConfiguration(
+        val projectId: String,
+        val apiKey: String,
+        val projectSecret: String,
+        val enableAutoRealTimeUpdates: Boolean
+    )
     data class ImageAsset(val key: String, val url: String)
+    data class ColorItem(val key: String, val value: String)
 
     private data class EncryptedPayload(val iv: String, val ciphertext: String, val tag: String)
     private data class AuthResult(
         val token: String?,
         @SerializedName("projectSecret") val receivedProjectSecret: String?,
         val tabs: List<String>?,
-        val stores: List<String>?
+        val stores: List<String>?,
+        val availableLanguages: List<String>?
     )
     private data class TranslationKeyItem(val key: String, val values: Map<String, String>)
     private data class TranslationResponse(val keys: List<TranslationKeyItem>?)
@@ -86,16 +85,28 @@ object CMSCureSDK {
     private val configLock = Any()
     private var authToken: String? = null
     private var symmetricKey: SecretKeySpec? = null
-    var debugLogsEnabled: Boolean = true
+    var debugLogsEnabled: Boolean = false
     internal var applicationContext: Context? = null
+    private var serverURL: String = DEFAULT_SERVER_URL
+    private var socketURL: String = DEFAULT_SOCKET_URL
+    private var isConnectingSocket: Boolean = false
+    private var handshakeTimeoutJob: Job? = null
+    private const val HANDSHAKE_TIMEOUT_MS = 15_000L
+    private const val MAX_SYNC_RETRIES = 2
     internal var imageLoader: ImageLoader? = null
 
     private var cache: MutableMap<String, MutableMap<String, MutableMap<String, String>>> = mutableMapOf()
     private var dataStoreCache: MutableMap<String, List<DataStoreItem>> = mutableMapOf()
     private val cacheLock = Any()
     private var currentLanguage: String = "en"
+    private var availableLanguagesCache: MutableList<String> = mutableListOf()
     private var knownProjectTabs: MutableSet<String> = mutableSetOf()
     private var knownDataStoreIdentifiers: MutableSet<String> = mutableSetOf()
+    private val autoSubscriptionLock = Any()
+    private var autoRegisteredScreens: MutableSet<String> = mutableSetOf()
+    private var autoSubscribedDataStores: MutableSet<String> = mutableSetOf()
+    private var autoSubscribedColors: Boolean = false
+    private var autoSubscribedGlobalImages: Boolean = false
 
     private const val PREFS_NAME = "CMSCureSDKPrefs"
     private const val KEY_CURRENT_LANGUAGE = "currentLanguage"
@@ -104,13 +115,14 @@ object CMSCureSDK {
     private const val TABS_FILE_NAME = "cmscure_tabs.json"
     private const val DATA_STORE_CACHE_FILE_NAME = "cmscure_datastore_cache.json"
     private const val DATA_STORE_LIST_FILE_NAME = "cmscure_datastore_list.json"
+    private const val LANGUAGES_FILE_NAME = "cmscure_languages.json"
     private var sharedPreferences: SharedPreferences? = null
 
     private var apiService: ApiService? = null
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: Socket? = null
     private val socketLock = Any()
-    private val _contentUpdateFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    private val _contentUpdateFlow = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 64)
     val contentUpdateFlow: SharedFlow<String> = _contentUpdateFlow.asSharedFlow()
 
     const val ALL_SCREENS_UPDATED = "__ALL_SCREENS_UPDATED__"
@@ -120,14 +132,42 @@ object CMSCureSDK {
     private interface ApiService {
         @POST("/api/sdk/auth")
         suspend fun authenticateSdk(@Body authRequest: Map<String, String>): AuthResult
-        @POST("/api/sdk/translations/{projectId}/{tabName}")
-        suspend fun getTranslations(@Path("projectId") projectId: String, @Path("tabName") tabName: String, @Header("X-API-Key") apiKey: String): TranslationResponse
+
+        @GET("/api/sdk/translations/{projectId}/{tabName}")
+        suspend fun getTranslations(
+            @Path("projectId") projectId: String,
+            @Path("tabName") tabName: String,
+            @Header("Authorization") authHeader: String?,
+            @Header("X-API-Key") apiKey: String
+        ): Response<TranslationResponse>
+
         @GET("/api/sdk/images/{projectId}")
-        suspend fun getImages(@Path("projectId") projectId: String, @Header("X-API-Key") apiKey: String): List<ImageAsset>
+        suspend fun getImages(
+            @Path("projectId") projectId: String,
+            @Header("Authorization") authHeader: String?,
+            @Header("X-API-Key") apiKey: String
+        ): Response<List<ImageAsset>>
+
         @GET("/api/sdk/store/{projectId}/{apiIdentifier}")
-        suspend fun getStore(@Path("projectId") projectId: String, @Path("apiIdentifier") apiIdentifier: String, @Header("X-API-Key") apiKey: String): DataStoreResponse
+        suspend fun getStore(
+            @Path("projectId") projectId: String,
+            @Path("apiIdentifier") apiIdentifier: String,
+            @Header("Authorization") authHeader: String?,
+            @Header("X-API-Key") apiKey: String
+        ): Response<DataStoreResponse>
+        @GET("/api/sdk/colors/{projectId}")
+        suspend fun getColors(
+            @Path("projectId") projectId: String,
+            @Header("Authorization") authHeader: String?,
+            @Header("X-API-Key") apiKey: String
+        ): Response<List<ColorItem>>
+
         @POST("/api/sdk/languages/{projectId}")
-        suspend fun getAvailableLanguages(@Path("projectId") projectId: String, @Header("X-API-Key") apiKey: String): LanguagesResponse
+        suspend fun getAvailableLanguages(
+            @Path("projectId") projectId: String,
+            @Header("Authorization") authHeader: String?,
+            @Header("X-API-Key") apiKey: String
+        ): Response<LanguagesResponse>
     }
 
     private val gson: Gson = GsonBuilder().registerTypeAdapter(JSONValue::class.java, JSONValue.GsonAdapter()).setLenient().create()
@@ -150,28 +190,50 @@ object CMSCureSDK {
      * Configures the SDK with necessary project credentials.
      * This method **MUST** be called once after [init].
      */
-    fun configure(context: Context, projectId: String, apiKey: String) {
-        if (projectId.isBlank() || apiKey.isBlank()) {
-            logError("Config failed: Project ID and API Key cannot be empty.")
+    fun configure(
+        context: Context,
+        projectId: String,
+        apiKey: String,
+        projectSecret: String,
+        enableAutoRealTimeUpdates: Boolean = true
+    ) {
+        if (projectId.isBlank() || apiKey.isBlank() || projectSecret.isBlank()) {
+            logError("Config failed: Project ID, API Key, and Project Secret cannot be empty.")
             return
         }
-        val serverUrl = try { URL("https://app.cmscure.com") } catch (e: Exception) {
-            logError("Config failed: Invalid server URL"); return
+
+        val baseUrl = try { URL(this.serverURL) } catch (e: Exception) {
+            logError("Config failed: Invalid server URL '${this.serverURL}'"); return
         }
 
         synchronized(configLock) {
-            if (this.configuration != null) { logError("Config ignored: SDK already configured."); return }
-            this.configuration = CureConfiguration(projectId, apiKey)
+            if (this.configuration != null) {
+                logError("Config ignored: SDK already configured.");
+                return
+            }
+            this.configuration = CureConfiguration(projectId, apiKey, projectSecret, enableAutoRealTimeUpdates)
+            // Reset auto-subscription tracking whenever we (re)configure
+            synchronized(autoSubscriptionLock) {
+                autoRegisteredScreens.clear()
+                autoSubscribedDataStores.clear()
+                autoSubscribedColors = false
+                autoSubscribedGlobalImages = false
+            }
         }
 
-        val loggingInterceptor = HttpLoggingInterceptor { message -> if (debugLogsEnabled) Log.d("$TAG-OkHttp", message) }
-            .apply { level = if (debugLogsEnabled) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE }
+        deriveSymmetricKey(projectSecret)
+
+        val loggingInterceptor = HttpLoggingInterceptor { message ->
+            if (debugLogsEnabled) Log.d("$TAG-OkHttp", message)
+        }.apply {
+            level = if (debugLogsEnabled) HttpLoggingInterceptor.Level.HEADERS else HttpLoggingInterceptor.Level.NONE
+        }
         val okHttpClient = OkHttpClient.Builder().addInterceptor(loggingInterceptor).build()
-        this.apiService = Retrofit.Builder().baseUrl(serverUrl).client(okHttpClient)
+        this.apiService = Retrofit.Builder().baseUrl(baseUrl).client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build().create(ApiService::class.java)
 
-        logDebug("SDK Configured for Project $projectId")
+        logDebug("SDK Configured for Project $projectId (auto realtime: $enableAutoRealTimeUpdates)")
         performAuthentication()
     }
 
@@ -189,27 +251,76 @@ object CMSCureSDK {
             return
         }
 
+        val cachedLanguages = synchronized(cacheLock) { availableLanguagesCache.toList() }
+        var deliveredCached = false
+        if (cachedLanguages.isNotEmpty()) {
+            deliveredCached = true
+            Handler(Looper.getMainLooper()).post { completion(cachedLanguages) }
+        }
+
         coroutineScope.launch {
             try {
-                val response = apiService?.getAvailableLanguages(config.projectId, config.apiKey)
-                val languagesFromServer = response?.languages ?: emptyList()
-                logDebug("Available languages fetched from server: $languagesFromServer")
-                withContext(Dispatchers.Main) { completion(languagesFromServer) }
+                val response = apiService?.getAvailableLanguages(config.projectId, currentAuthHeader(), config.apiKey)
+                if (response?.isSuccessful == true) {
+                    val languagesFromServer = response.body()?.languages?.filter { it.isNotBlank() } ?: emptyList()
+                    logDebug("Available languages fetched from server: $languagesFromServer")
+
+                    var shouldDeliver = !deliveredCached
+                    if (languagesFromServer.isNotEmpty()) {
+                        val changed = synchronized(cacheLock) {
+                            if (languagesFromServer != availableLanguagesCache) {
+                                availableLanguagesCache = languagesFromServer.toMutableList()
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        if (changed) {
+                            persistLanguagesToDisk()
+                            shouldDeliver = true
+                        }
+                    }
+
+                    if (shouldDeliver) {
+                        val result = if (languagesFromServer.isNotEmpty()) languagesFromServer else inferLanguagesFromCache()
+                        deliveredCached = true
+                        withContext(Dispatchers.Main) { completion(result) }
+                    }
+                } else {
+                    val code = response?.code() ?: -1
+                    val errorBody = response?.errorBody()?.string()
+                    logError("Failed to fetch available languages. HTTP $code Body=$errorBody")
+                    if (!deliveredCached) {
+                        val inferred = inferLanguagesFromCache()
+                        logDebug("Falling back to languages inferred from cache: $inferred")
+                        deliveredCached = true
+                        withContext(Dispatchers.Main) { completion(inferred) }
+                    }
+                }
             } catch (e: Exception) {
                 logError("Failed to fetch available languages from server: ${e.message}")
-                val cachedLangs = synchronized(cacheLock) {
-                    cache.values.asSequence()
-                        .flatMap { it.values.asSequence() }
-                        .flatMap { it.keys.asSequence() }
-                        .distinct()
-                        .filter { it != "color" && it != "url" }
-                        .sorted()
-                        .toList()
+                if (!deliveredCached) {
+                    val inferred = inferLanguagesFromCache()
+                    logDebug("Falling back to languages inferred from cache: $inferred")
+                    deliveredCached = true
+                    withContext(Dispatchers.Main) { completion(inferred) }
                 }
-                logDebug("Falling back to languages inferred from cache: $cachedLangs")
-                withContext(Dispatchers.Main) { completion(cachedLangs) }
             }
         }
+    }
+
+    private fun inferLanguagesFromCache(): List<String> = synchronized(cacheLock) {
+        if (availableLanguagesCache.isNotEmpty()) {
+            return@synchronized availableLanguagesCache.toList()
+        }
+
+        cache.values.asSequence()
+            .flatMap { it.values.asSequence() }
+            .flatMap { it.keys.asSequence() }
+            .distinct()
+            .filter { it != "color" && it != "url" }
+            .sorted()
+            .toList()
     }
 
     private fun performAuthentication() {
@@ -219,24 +330,41 @@ object CMSCureSDK {
             try {
                 val authResult = apiService?.authenticateSdk(mapOf("apiKey" to config.apiKey, "projectId" to config.projectId))
 
-                // CORRECTED: Use `receivedProjectSecret` which matches the data class definition
-                if (authResult?.token != null && authResult.receivedProjectSecret != null) {
-                    authToken = authResult.token
-
-                    // CORRECTED: Pass the correct property to the function
-                    deriveSymmetricKey(authResult.receivedProjectSecret)
-
-                    synchronized(cacheLock) {
-                        knownProjectTabs = (authResult.tabs ?: emptyList()).toMutableSet()
-                        knownDataStoreIdentifiers = (authResult.stores ?: emptyList()).toMutableSet()
-                    }
-                    persistCoreState()
-                    logDebug("✅ Auth successful. Token: ${authToken?.take(8)}..., Tabs: ${knownProjectTabs.size}, Stores: ${knownDataStoreIdentifiers.size}")
-                    connectSocketIfNeeded()
-                    syncIfOutdated()
-                } else {
-                    logError("Auth failed: Response missing token or projectSecret.")
+                if (authResult?.token.isNullOrBlank()) {
+                    logError("Auth failed: Response missing token.")
+                    return@launch
                 }
+
+                authToken = authResult?.token
+
+                // Prefer the backend-provided secret if available, otherwise keep the configured one.
+                authResult?.receivedProjectSecret?.takeIf { it.isNotBlank() }?.let { serverSecret ->
+                    deriveSymmetricKey(serverSecret)
+                    synchronized(configLock) {
+                        configuration = configuration?.copy(projectSecret = serverSecret)
+                    }
+                }
+
+                synchronized(cacheLock) {
+                    authResult?.tabs?.let { knownProjectTabs = it.toMutableSet() }
+                    authResult?.stores?.let { knownDataStoreIdentifiers = it.toMutableSet() }
+                    authResult?.availableLanguages
+                        ?.filter { it.isNotBlank() }
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { availableLanguagesCache = it.toMutableList() }
+                }
+
+                persistCoreState()
+                persistTabsToDisk()
+                persistDataStoreListToDisk()
+                persistLanguagesToDisk()
+
+                logDebug(
+                    "✅ Auth successful. Tabs: ${knownProjectTabs.size}, Stores: ${knownDataStoreIdentifiers.size}, Languages: ${availableLanguagesCache.size}"
+                )
+
+                connectSocketIfNeeded()
+                syncIfOutdated()
             } catch (e: Exception) {
                 logError("🆘 Auth exception: ${e.message}")
             }
@@ -252,37 +380,55 @@ object CMSCureSDK {
         } catch (e: Exception) { logError("⚠️ Failed to derive symmetric key: ${e.message}") }
     }
 
+    private fun currentAuthHeader(): String? {
+        val token = authToken
+        return if (!token.isNullOrBlank()) "Bearer $token" else null
+    }
+
     private fun connectSocketIfNeeded() {
         val config = getCurrentConfiguration() ?: return
         if (socket?.connected() == true) return
 
         synchronized(socketLock) {
+            if (isConnectingSocket) return
+            isConnectingSocket = true
+
             socket?.disconnect()?.off()
+            socket = null
+
             try {
                 val opts = IO.Options.builder()
                     .setForceNew(true)
                     .setReconnection(true)
+                    .setReconnectionAttempts(10)
+                    .setReconnectionDelayMax(30_000)
                     .setPath("/socket.io/")
                     .setTransports(arrayOf(io.socket.engineio.client.transports.WebSocket.NAME))
-                    .setSecure(true)              // Add this
+                    .setSecure(true)
                     .build()
-                val socketUri = URI.create("wss://app.cmscure.com")
+                val socketUri = URI.create(socketURL)
                 socket = IO.socket(socketUri, opts)
                 setupSocketHandlers(config.projectId)
                 socket?.connect()
                 logDebug("🔌 Attempting socket connection to: $socketUri")
             } catch (e: Exception) {
                 logError("Socket connection setup exception: ${e.message}")
+            } finally {
+                isConnectingSocket = false
             }
         }
     }
 
     private fun setupSocketHandlers(projectId: String) {
         socket?.on(Socket.EVENT_CONNECT) {
-            logDebug("🟢✅ Socket connected! SID: ${socket?.id()}")
+            logDebug("🟢 Socket connected! SID: ${socket?.id()}")
             sendSocketHandshake(projectId)
+            startHandshakeTimeout(projectId)
         }
-        socket?.on("handshake_ack") { logDebug("🤝 Handshake Acknowledged.") }
+        socket?.on("handshake_ack") {
+            cancelHandshakeTimeout()
+            logDebug("🤝 Handshake Acknowledged.")
+        }
         socket?.on("translationsUpdated") { handleSocketUpdate(it, false) }
         socket?.on("dataStoreUpdated") { handleSocketUpdate(it, true) }
         socket?.on(Socket.EVENT_DISCONNECT) { logDebug("🔌 Socket disconnected.") }
@@ -330,23 +476,50 @@ object CMSCureSDK {
         }
     }
     /** Returns a translation for the given key and tab, or an empty string if not found. */
-    fun translation(forKey: String, inTab: String): String = synchronized(cacheLock) {
-        return cache[inTab]?.get(forKey)?.get(currentLanguage) ?: ""
+    fun translation(forKey: String, inTab: String): String {
+        maybeAutoSubscribeTab(inTab)
+
+        val value = synchronized(cacheLock) {
+            cache[inTab]?.get(forKey)?.get(currentLanguage) ?: ""
+        }
+
+        if (debugLogsEnabled) {
+            if (value.isEmpty()) {
+                logDebug("🔍 Translation not found for key='$forKey' tab='$inTab' lang='$currentLanguage'")
+            } else {
+                logDebug("✅ Translation cache hit for key='$forKey' tab='$inTab' lang='$currentLanguage'")
+            }
+        }
+
+        return value
     }
 
     /** Returns a color hex string for the given key, or null if not found. */
-    fun colorValue(forKey: String): String? = synchronized(cacheLock) {
-        return cache["__colors__"]?.get(forKey)?.get("color")
+    fun colorValue(forKey: String): String? {
+        maybeAutoSubscribeColors()
+
+        val color = synchronized(cacheLock) { cache[COLORS_UPDATED]?.get(forKey)?.get("color") }
+        if (debugLogsEnabled && color == null) {
+            logDebug("🔍 Color not found for key='$forKey'")
+        }
+        return color
     }
 
     /** Returns an image URL string for the given global asset key, or null if not found. */
-    fun imageURL(forKey: String): String? = synchronized(cacheLock) {
-        return cache[IMAGES_UPDATED]?.get(forKey)?.get("url")
+    fun imageURL(forKey: String): String? {
+        maybeAutoSubscribeGlobalImages()
+
+        val url = synchronized(cacheLock) { cache[IMAGES_UPDATED]?.get(forKey)?.get("url") }
+        if (debugLogsEnabled && url == null) {
+            logDebug("🔍 Image URL not found for key='$forKey'")
+        }
+        return url
     }
 
     /** Returns a list of all items for a given Data Store from the local cache. */
-    fun getStoreItems(forIdentifier: String): List<DataStoreItem> = synchronized(cacheLock) {
-        return dataStoreCache[forIdentifier] ?: emptyList()
+    fun getStoreItems(forIdentifier: String): List<DataStoreItem> {
+        maybeAutoSubscribeStore(forIdentifier)
+        return synchronized(cacheLock) { dataStoreCache[forIdentifier] ?: emptyList() }
     }
 
     /** Sets the active language and triggers a full content refresh. */
@@ -361,11 +534,121 @@ object CMSCureSDK {
     /** Gets the current active language code. */
     fun getLanguage(): String = currentLanguage
 
+    /** Returns the [LanguageDirection] for the current language (LTR or RTL). */
+    val languageDirection: LanguageDirection
+        get() = LanguageDirection.direction(currentLanguage)
+
+    /** Returns a list of [DataStoreItem]s with convenience accessors, matching the iOS `dataStoreRecords(for:)` API. */
+    fun dataStoreRecords(forIdentifier: String): List<DataStoreItem> = getStoreItems(forIdentifier)
+
+    /** Indicates whether automatic real-time updates are enabled in the current configuration. */
+    fun isAutoRealTimeUpdatesEnabled(): Boolean = synchronized(configLock) {
+        configuration?.enableAutoRealTimeUpdates ?: false
+    }
+
+    /** Returns a snapshot of tabs/screens that have been auto-subscribed for real-time updates. */
+    fun getAutoSubscribedScreens(): Set<String> = synchronized(autoSubscriptionLock) { autoRegisteredScreens.toSet() }
+
+    /** Returns a snapshot of data stores currently auto-subscribed for real-time updates. */
+    fun getAutoSubscribedDataStores(): Set<String> = synchronized(autoSubscriptionLock) { autoSubscribedDataStores.toSet() }
+
+    /** Indicates whether the global colors collection is currently auto-subscribed. */
+    fun isColorsAutoSubscribed(): Boolean = synchronized(autoSubscriptionLock) { autoSubscribedColors }
+
+    /** Indicates whether the global images collection is currently auto-subscribed. */
+    fun isGlobalImagesAutoSubscribed(): Boolean = synchronized(autoSubscriptionLock) { autoSubscribedGlobalImages }
+
+    private fun maybeAutoSubscribeTab(screenName: String) {
+        if (!isAutoRealTimeUpdatesEnabled() || screenName.isBlank()) return
+
+        val shouldSync = synchronized(autoSubscriptionLock) {
+            if (autoRegisteredScreens.contains(screenName)) {
+                false
+            } else {
+                autoRegisteredScreens.add(screenName)
+                true
+            }
+        }
+
+        if (shouldSync) {
+            markTabKnown(screenName)
+            sync(screenName)
+        }
+    }
+
+    private fun maybeAutoSubscribeColors() {
+        if (!isAutoRealTimeUpdatesEnabled()) return
+
+        val shouldSync = synchronized(autoSubscriptionLock) {
+            if (autoSubscribedColors) {
+                false
+            } else {
+                autoSubscribedColors = true
+                true
+            }
+        }
+
+        if (shouldSync) {
+            markTabKnown(COLORS_UPDATED)
+            sync(COLORS_UPDATED)
+        }
+    }
+
+    private fun maybeAutoSubscribeGlobalImages() {
+        if (!isAutoRealTimeUpdatesEnabled()) return
+
+        val shouldSync = synchronized(autoSubscriptionLock) {
+            if (autoSubscribedGlobalImages) {
+                false
+            } else {
+                autoSubscribedGlobalImages = true
+                true
+            }
+        }
+
+        if (shouldSync) {
+            markTabKnown(IMAGES_UPDATED)
+            sync(IMAGES_UPDATED)
+        }
+    }
+
+    private fun maybeAutoSubscribeStore(apiIdentifier: String) {
+        if (!isAutoRealTimeUpdatesEnabled() || apiIdentifier.isBlank()) return
+
+        val shouldSync = synchronized(autoSubscriptionLock) {
+            if (autoSubscribedDataStores.contains(apiIdentifier)) {
+                false
+            } else {
+                autoSubscribedDataStores.add(apiIdentifier)
+                true
+            }
+        }
+
+        if (shouldSync) {
+            markStoreKnown(apiIdentifier)
+            syncStore(apiIdentifier)
+        }
+    }
+
+    private fun markTabKnown(screenName: String) {
+        val added = synchronized(cacheLock) { knownProjectTabs.add(screenName) }
+        if (added) {
+            persistTabsToDisk()
+        }
+    }
+
+    private fun markStoreKnown(apiIdentifier: String) {
+        val added = synchronized(cacheLock) { knownDataStoreIdentifiers.add(apiIdentifier) }
+        if (added) {
+            persistDataStoreListToDisk()
+        }
+    }
+
     /** Manually triggers a sync for a specific screen, or for images/colors using the constants. */
     fun sync(screenName: String, completion: ((Boolean) -> Unit)? = null) {
         when (screenName) {
             IMAGES_UPDATED -> syncImages(completion)
-            COLORS_UPDATED -> syncTranslations("__colors__", completion)  // Already correct
+            COLORS_UPDATED -> syncColors(completion)
             else -> syncTranslations(screenName, completion)
         }
     }
@@ -375,49 +658,152 @@ object CMSCureSDK {
         val config = getCurrentConfiguration() ?: run { completion?.invoke(false); return }
         logDebug("🔄 Syncing data store '$apiIdentifier'...")
         coroutineScope.launch {
-            var success = false
-            try {
-                val response = apiService?.getStore(config.projectId, apiIdentifier, config.apiKey)
-                if (response != null) {
-                    synchronized(cacheLock) {
-                        dataStoreCache[apiIdentifier] = response.items
+            val success = retrySync("store '$apiIdentifier'") {
+                val response = apiService?.getStore(config.projectId, apiIdentifier, currentAuthHeader(), config.apiKey)
+                if (response?.isSuccessful == true) {
+                    val body = response.body()
+                    if (body != null) {
+                        synchronized(cacheLock) {
+                            dataStoreCache[apiIdentifier] = body.items
+                        }
+                        markStoreKnown(apiIdentifier)
+                        persistDataStoreCacheToDisk()
+                        _contentUpdateFlow.emit(apiIdentifier)
+                        logDebug("✅ Synced data store '$apiIdentifier' with ${body.items.size} items.")
+                        true
+                    } else {
+                        logError("Sync store '$apiIdentifier' returned empty body despite HTTP 200.")
+                        false
                     }
-                    persistDataStoreCacheToDisk()
-                    _contentUpdateFlow.tryEmit(apiIdentifier)
-                    success = true
-                    logDebug("✅ Synced data store '$apiIdentifier' with ${response.items.size} items.")
+                } else {
+                    val code = response?.code() ?: -1
+                    val errorBody = response?.errorBody()?.string()
+                    logError("Sync store '$apiIdentifier' failed. HTTP $code Body=$errorBody")
+                    false
                 }
-            } catch (e: Exception) { logError("🆘 Sync store '$apiIdentifier' exception: ${e.message}") }
+            }
             withContext(Dispatchers.Main) { completion?.invoke(success) }
         }
+    }
+
+    /**
+     * Retries a suspend block up to [MAX_SYNC_RETRIES] times with exponential backoff.
+     */
+    private suspend fun retrySync(label: String, block: suspend () -> Boolean): Boolean {
+        for (attempt in 0..MAX_SYNC_RETRIES) {
+            try {
+                if (block()) return true
+            } catch (e: Exception) {
+                logError("🆘 Sync $label exception (attempt ${attempt + 1}/${MAX_SYNC_RETRIES + 1}): ${e.message}")
+            }
+            if (attempt < MAX_SYNC_RETRIES) {
+                val delayMs = (attempt + 1) * 2000L
+                logDebug("Retrying $label in ${delayMs}ms...")
+                delay(delayMs)
+            }
+        }
+        return false
     }
 
     private fun syncIfOutdated() {
         val tabs = synchronized(cacheLock) { knownProjectTabs.toList() }
         val stores = synchronized(cacheLock) { knownDataStoreIdentifiers.toList() }
-        (tabs + listOf(COLORS_UPDATED, IMAGES_UPDATED)).forEach { sync(it) }
-        stores.forEach { syncStore(it) }
-        coroutineScope.launch { _contentUpdateFlow.tryEmit(ALL_SCREENS_UPDATED) }
+
+        coroutineScope.launch {
+            val jobs = mutableListOf<Job>()
+
+            (tabs + listOf(COLORS_UPDATED, IMAGES_UPDATED))
+                .distinct()
+                .forEach { screenName ->
+                    jobs += launch { syncSuspend(screenName) }
+                }
+
+            stores.distinct().forEach { identifier ->
+                jobs += launch { syncStoreSuspend(identifier) }
+            }
+
+            jobs.joinAll()
+            _contentUpdateFlow.emit(ALL_SCREENS_UPDATED)
+        }
+    }
+
+    private suspend fun syncSuspend(screenName: String) {
+        val deferred = CompletableDeferred<Boolean>()
+        sync(screenName) { success -> deferred.complete(success) }
+        deferred.await()
+    }
+
+    private suspend fun syncStoreSuspend(apiIdentifier: String) {
+        val deferred = CompletableDeferred<Boolean>()
+        syncStore(apiIdentifier) { success -> deferred.complete(success) }
+        deferred.await()
     }
 
     private fun syncTranslations(screenName: String, completion: ((Boolean) -> Unit)?) {
+        logDebug("Syncing tab '$screenName' (lang=${getLanguage()})")
+
         val config = getCurrentConfiguration() ?: run { completion?.invoke(false); return }
         logDebug("🔄 Syncing translations for '$screenName'...")
         coroutineScope.launch {
-            var success = false
-            try {
-                val response = apiService?.getTranslations(config.projectId, screenName, config.apiKey)
-                if (response?.keys != null) {
-                    synchronized(cacheLock) {
-                        val screenCache = cache.getOrPut(screenName) { mutableMapOf() }
-                        response.keys.forEach { item -> screenCache[item.key] = item.values.toMutableMap() }
+            val success = retrySync("translations '$screenName'") {
+                val response = apiService?.getTranslations(config.projectId, screenName, currentAuthHeader(), config.apiKey)
+                if (response?.isSuccessful == true) {
+                    val body = response.body()
+                    if (body?.keys != null) {
+                        synchronized(cacheLock) {
+                            val screenCache = cache.getOrPut(screenName) { mutableMapOf() }
+                            body.keys.forEach { item -> screenCache[item.key] = item.values.toMutableMap() }
+                        }
+                        markTabKnown(screenName)
+                        persistCacheToDisk()
+                        _contentUpdateFlow.emit(screenName)
+                        logDebug("✅ Synced translations for '$screenName' with ${body.keys.size} entries.")
+                        true
+                    } else {
+                        logError("Sync translations '$screenName' returned empty keys despite HTTP 200.")
+                        false
                     }
-                    persistCacheToDisk()
-                    _contentUpdateFlow.tryEmit(screenName)
-                    success = true
-                    logDebug("✅ Synced translations for '$screenName'.")
+                } else {
+                    val code = response?.code() ?: -1
+                    val errorBody = response?.errorBody()?.string()
+                    logError("Sync translations '$screenName' failed. HTTP $code Body=$errorBody")
+                    false
                 }
-            } catch (e: Exception) { logError("🆘 Sync translations '$screenName' exception: ${e.message}") }
+            }
+            withContext(Dispatchers.Main) { completion?.invoke(success) }
+        }
+    }
+
+    private fun syncColors(completion: ((Boolean) -> Unit)?) {
+        val config = getCurrentConfiguration() ?: run { completion?.invoke(false); return }
+        logDebug("🔄 Syncing colors...")
+        coroutineScope.launch {
+            val success = retrySync("colors") {
+                val response = apiService?.getColors(config.projectId, currentAuthHeader(), config.apiKey)
+                if (response?.isSuccessful == true) {
+                    val colors = response.body()
+                    if (colors != null) {
+                        synchronized(cacheLock) {
+                            val colorCache = cache.getOrPut(COLORS_UPDATED) { mutableMapOf() }
+                            colorCache.clear()
+                            colors.forEach { color -> colorCache[color.key] = mutableMapOf("color" to color.value) }
+                        }
+                        markTabKnown(COLORS_UPDATED)
+                        persistCacheToDisk()
+                        _contentUpdateFlow.emit(COLORS_UPDATED)
+                        logDebug("✅ Synced ${colors.size} colors.")
+                        true
+                    } else {
+                        logError("Sync colors succeeded with empty body.")
+                        false
+                    }
+                } else {
+                    val code = response?.code() ?: -1
+                    val errorBody = response?.errorBody()?.string()
+                    logError("Sync colors failed. HTTP $code Body=$errorBody")
+                    false
+                }
+            }
             withContext(Dispatchers.Main) { completion?.invoke(success) }
         }
     }
@@ -426,20 +812,30 @@ object CMSCureSDK {
         val config = getCurrentConfiguration() ?: run { completion?.invoke(false); return }
         logDebug("🔄 Syncing image assets...")
         coroutineScope.launch {
-            var success = false
-            try {
-                val imageAssets = apiService?.getImages(config.projectId, config.apiKey)
-                if (imageAssets != null) {
-                    synchronized(cacheLock) {
-                        val imageCache = cache.getOrPut(IMAGES_UPDATED) { mutableMapOf() }
-                        imageAssets.forEach { asset -> imageCache[asset.key] = mutableMapOf("url" to asset.url) }
+            val success = retrySync("images") {
+                val response = apiService?.getImages(config.projectId, currentAuthHeader(), config.apiKey)
+                if (response?.isSuccessful == true) {
+                    val imageAssets = response.body()
+                    if (imageAssets != null) {
+                        synchronized(cacheLock) {
+                            val imageCache = cache.getOrPut(IMAGES_UPDATED) { mutableMapOf() }
+                            imageAssets.forEach { asset -> imageCache[asset.key] = mutableMapOf("url" to asset.url) }
+                        }
+                        persistCacheToDisk()
+                        _contentUpdateFlow.emit(IMAGES_UPDATED)
+                        logDebug("✅ Synced ${imageAssets.size} image assets.")
+                        true
+                    } else {
+                        logError("Sync images succeeded with empty body.")
+                        false
                     }
-                    persistCacheToDisk()
-                    _contentUpdateFlow.tryEmit(IMAGES_UPDATED)
-                    success = true
-                    logDebug("✅ Synced ${imageAssets.size} image assets.")
+                } else {
+                    val code = response?.code() ?: -1
+                    val errorBody = response?.errorBody()?.string()
+                    logError("Sync images failed. HTTP $code Body=$errorBody")
+                    false
                 }
-            } catch (e: Exception) { logError("🆘 Sync images exception: ${e.message}") }
+            }
             withContext(Dispatchers.Main) { completion?.invoke(success) }
         }
     }
@@ -461,6 +857,7 @@ object CMSCureSDK {
         loadTabsFromDisk()
         loadDataStoreCacheFromDisk()
         loadDataStoreListFromDisk()
+        loadLanguagesFromDisk()
     }
 
     private fun persistCacheToDisk() = synchronized(cacheLock) {
@@ -531,9 +928,44 @@ object CMSCureSDK {
         }
     }
 
+    private fun persistLanguagesToDisk() = synchronized(cacheLock) {
+        applicationContext?.let { File(it.filesDir, LANGUAGES_FILE_NAME).writeText(gson.toJson(availableLanguagesCache)) }
+    }
+
+    private fun loadLanguagesFromDisk() = synchronized(cacheLock) {
+        applicationContext?.let {
+            try {
+                val file = File(it.filesDir, LANGUAGES_FILE_NAME)
+                if (file.exists() && file.length() > 0) {
+                    val json = file.readText()
+                    val type = object : TypeToken<MutableList<String>>() {}.type
+                    availableLanguagesCache = gson.fromJson(json, type) ?: mutableListOf()
+                }
+            } catch (e: Exception) { logError("Failed to load languages cache: ${e.message}") }
+        }
+    }
+
+    private fun startHandshakeTimeout(projectId: String) {
+        cancelHandshakeTimeout()
+        handshakeTimeoutJob = coroutineScope.launch {
+            delay(HANDSHAKE_TIMEOUT_MS)
+            logError("Handshake timeout after ${HANDSHAKE_TIMEOUT_MS}ms. Reconnecting...")
+            synchronized(socketLock) {
+                socket?.disconnect()?.off()
+                socket = null
+            }
+            connectSocketIfNeeded()
+        }
+    }
+
+    private fun cancelHandshakeTimeout() {
+        handshakeTimeoutJob?.cancel()
+        handshakeTimeoutJob = null
+    }
+
     private fun getCurrentConfiguration(): CureConfiguration? = synchronized(configLock) { configuration }
     private fun logDebug(message: String) { if (debugLogsEnabled) Log.d(TAG, message) }
-    private fun logError(message: String) { Log.e(TAG, message) }
+    private fun logError(message: String) { if (debugLogsEnabled) Log.e(TAG, message) }
 }
 
 /**
@@ -600,115 +1032,6 @@ sealed class JSONValue {
 // --- Jetpack Compose Integration ---
 
 /**
- * A Composable that provides a reactive state for a single translation string.
- * The view will automatically recompose whenever the translation is updated.
- */
-@Composable
-fun cureString(key: String, tab: String, default: String): State<String> {
-    return produceState(initialValue = CMSCureSDK.translation(forKey = key, inTab = tab).ifEmpty { default }) {
-        CMSCureSDK.contentUpdateFlow.collectLatest { updatedTab ->
-            if (updatedTab == tab || updatedTab == CMSCureSDK.ALL_SCREENS_UPDATED) {
-                value = CMSCureSDK.translation(forKey = key, inTab = tab).ifEmpty { default }
-            }
-        }
-    }
-}
-
-/** Overload for cureString with a default empty string. */
-@Composable
-fun cureString(key: String, tab: String): State<String> = cureString(key, tab, default = "")
-
-/**
- * A Composable that provides a reactive state for a single color.
- */
-@Composable
-fun cureColor(key: String, default: Color = Color.Gray): State<Color> {
-    fun parseColor(hex: String?) = hex?.let {
-        try {
-            Color(android.graphics.Color.parseColor(it))
-        } catch (e: Exception) {
-            default
-        }
-    } ?: default
-
-    return produceState(initialValue = parseColor(CMSCureSDK.colorValue(forKey = key))) {
-        CMSCureSDK.contentUpdateFlow.collectLatest { id ->
-            if (id == CMSCureSDK.COLORS_UPDATED || id == CMSCureSDK.ALL_SCREENS_UPDATED) {
-                value = parseColor(CMSCureSDK.colorValue(forKey = key))
-            }
-        }
-    }
-}
-
-
-/**
- * A Composable that provides a reactive state for an image asset's URL string.
- */
-@Composable
-fun cureImage(key: String, tab: String? = null, default: String? = null): State<String?> {
-    val initialValue = (if (tab == null) CMSCureSDK.imageURL(forKey = key) else CMSCureSDK.translation(forKey = key, inTab = tab).takeIf { it.isNotBlank() }) ?: default
-
-    return produceState(initialValue = initialValue) {
-        CMSCureSDK.contentUpdateFlow.collectLatest { updatedIdentifier ->
-            if (updatedIdentifier == CMSCureSDK.ALL_SCREENS_UPDATED || (tab == null && updatedIdentifier == CMSCureSDK.IMAGES_UPDATED) || updatedIdentifier == tab) {
-                value = (if (tab == null) CMSCureSDK.imageURL(forKey = key) else CMSCureSDK.translation(forKey = key, inTab = tab).takeIf { it.isNotBlank() }) ?: default
-            }
-        }
-    }
-}
-
-/** Overload for cureImage that assumes a global asset. */
-@Composable
-fun cureImage(key: String): State<String?> = cureImage(key, tab = null, default = null)
-
-
-/**
- * A Composable that provides a reactive state for a list of items from a Data Store.
- */
-@Composable
-fun cureDataStore(apiIdentifier: String): State<List<DataStoreItem>> {
-    return produceState<List<DataStoreItem>>(initialValue = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier)) {
-        CMSCureSDK.syncStore(apiIdentifier) { success ->
-            if(success) value = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier)
-        }
-        CMSCureSDK.contentUpdateFlow.collectLatest { id ->
-            if (id == apiIdentifier || id == CMSCureSDK.ALL_SCREENS_UPDATED) {
-                value = CMSCureSDK.getStoreItems(forIdentifier = apiIdentifier)
-            }
-        }
-    }
-}
-
-/**
- * A cache-enabled Composable for displaying images from CMSCure.
- */
-@Composable
-fun CureSDKImage(
-    url: String?,
-    contentDescription: String?,
-    modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Fit
-) {
-    val context = CMSCureSDK.applicationContext
-    val imageLoader = CMSCureSDK.imageLoader
-    if (context == null || imageLoader == null) {
-        Box(modifier.background(Color.Gray.copy(alpha = 0.1f)))
-        return
-    }
-
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data(url)
-            .crossfade(true)
-            .build(),
-        contentDescription = contentDescription,
-        imageLoader = imageLoader,
-        modifier = modifier,
-        contentScale = contentScale
-    )
-}
-
-/**
  * Represents a single item within a Data Store.
  * @property id The unique identifier of the item.
  * @property data A map where keys are your field names and values are the content, wrapped in a [JSONValue].
@@ -720,4 +1043,28 @@ data class DataStoreItem(
     val data: Map<String, JSONValue>,
     val createdAt: String,
     val updatedAt: String
-)
+) {
+    /** Returns the localized string for the given field key, or null. */
+    fun string(key: String): String? = data[key]?.localizedString
+
+    /** Returns the integer value for the given field key, or null. */
+    fun int(key: String): Int? = data[key]?.intValue
+
+    /** Returns the double value for the given field key, or null. */
+    fun double(key: String): Double? = when (val v = data[key]) {
+        is JSONValue.DoubleValue -> v.value
+        is JSONValue.IntValue -> v.value.toDouble()
+        is JSONValue.StringValue -> v.value.toDoubleOrNull()
+        else -> null
+    }
+
+    /** Returns the boolean value for the given field key, or null. */
+    fun bool(key: String): Boolean? = data[key]?.boolValue
+
+    /**
+     * Returns the CTA URL for this item if a `cta_url` field is present and non-blank.
+     * Mirrors the iOS SDK's `ctaURL` property.
+     */
+    val ctaURL: String?
+        get() = data["cta_url"]?.stringValue?.takeIf { it.isNotBlank() }
+}
