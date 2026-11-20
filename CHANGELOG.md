@@ -18,6 +18,9 @@ Changed
 * The error for a missing native module now says what to do in Expo (development build, not Expo Go).
 * Types: `CMSCureProvider` and `CureSDKImage` return `ReactElement` (the global `JSX` namespace is gone in React 19 types).
 
+Known issues
+* Expo SDK 58, iOS: the build stops inside Expo's own `ExpoModulesJSI` (Swift 6 data race error, Xcode 26.3) before this package is built. Target Expo SDK 55 for now. Android on 58 is fine.
+
 Notes
 * The SDK only reads published content: strings, colors, image URLs and data store rows. It never runs remote code and cannot write to your project.
 * `apiKey` accepts a per project app key (`cmsc_ck_...`, Project settings, API keys), which can be revoked without touching other apps. The account API key keeps working.

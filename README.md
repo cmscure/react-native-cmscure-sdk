@@ -58,6 +58,8 @@ npx expo install @cmscure/react-native-cmscure-sdk
 
 Then run `npx expo prebuild` (or build with EAS). The plugin sets `ios.useFrameworks` to `static` and makes sure the iOS deployment target is at least 14.0 and Android minSdk at least 24. If your app already sets `ios.useFrameworks` through `expo-build-properties`, keep it at `static`; to stop the plugin from touching it use `["@cmscure/react-native-cmscure-sdk", { "ios": { "useFrameworks": false } }]`.
 
+**Known issue:** on Expo SDK 58 the iOS build currently stops inside Expo's own `ExpoModulesJSI` (Swift 6 data race error with Xcode 26.3), before this package is built. Use Expo SDK 55 for now; Android on 58 builds and runs.
+
 This is a native module, so it does not run in Expo Go. Use a development build (`npx expo run:ios`, `npx expo run:android` or `eas build --profile development`). Tested on Expo SDK 55 and 58 with the New Architecture, see [`example-expo/`](example-expo/).
 
 ### Web (react-native-web)

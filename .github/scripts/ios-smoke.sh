@@ -2,7 +2,7 @@
 # Boots a simulator, installs the Release .app and waits for the smoke line
 # from example-expo/App.tsx in the unified log.
 set -euo pipefail
-APP="$(ls -d example-expo/ios/build/Build/Products/Release-iphonesimulator/*.app | head -1)"
+APP="$(ls -d ${APP_DIR:-example-expo}/ios/build/Build/Products/Release-iphonesimulator/*.app | head -1)"
 BUNDLE_ID="com.cmscure.example"
 
 UDID="$(xcrun simctl list devices available -j | python3 -c '

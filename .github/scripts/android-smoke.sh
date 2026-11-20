@@ -2,7 +2,7 @@
 # Runs inside the emulator job: install the release APK, start it and wait for
 # the smoke line from example-expo/App.tsx.
 set -euo pipefail
-APK="example-expo/android/app/build/outputs/apk/release/app-release.apk"
+APK="${APP_DIR:-example-expo}/android/app/build/outputs/apk/release/app-release.apk"
 PKG="com.cmscure.example"
 
 adb install -r "$APK"
