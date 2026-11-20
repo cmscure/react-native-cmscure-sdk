@@ -24,7 +24,7 @@ The official React Native SDK for [CMSCure](https://cmscure.com) — deliver tra
 | Requirement | Minimum |
 |---|---|
 | React Native | 0.71+ (New Architecture supported) |
-| Expo | Development build; tested on SDK 55 and 58 |
+| Expo | Development build; tested on SDK 55 (Android also on 58, see known issue) |
 | iOS Target | 14.0+ |
 | Android API | 24+ |
 
@@ -60,7 +60,7 @@ Then run `npx expo prebuild` (or build with EAS). The plugin sets `ios.useFramew
 
 **Known issue:** on Expo SDK 58 the iOS build currently stops inside Expo's own `ExpoModulesJSI` (Swift 6 data race error with Xcode 26.3), before this package is built. Use Expo SDK 55 for now; Android on 58 builds and runs.
 
-This is a native module, so it does not run in Expo Go. Use a development build (`npx expo run:ios`, `npx expo run:android` or `eas build --profile development`). Tested on Expo SDK 55 and 58 with the New Architecture, see [`example-expo/`](example-expo/).
+This is a native module, so it does not run in Expo Go. Use a development build (`npx expo run:ios`, `npx expo run:android` or `eas build --profile development`). Tested on Expo SDK 55 with the New Architecture (Android also on 58), see [`example-expo/`](example-expo/).
 
 ### Web (react-native-web)
 
@@ -166,9 +166,8 @@ Wrap your app in `CMSCureProvider` — it initializes the SDK, syncs colors and 
 import { CMSCureProvider } from '@cmscure/react-native-cmscure-sdk';
 
 const cmsConfig = {
-  projectId: 'YOUR_PROJECT_ID',       // ← replace
-  apiKey: 'YOUR_API_KEY',             // ← replace
-  projectSecret: 'YOUR_PROJECT_SECRET', // ← replace
+  projectId: 'YOUR_PROJECT_ID',   // Project settings
+  apiKey: 'cmsc_ck_YOUR_APP_KEY', // Project settings, API keys, App keys
 };
 
 export default function App() {
@@ -180,7 +179,9 @@ export default function App() {
 }
 ```
 
-> **Replace** `YOUR_PROJECT_ID`, `YOUR_API_KEY`, and `YOUR_PROJECT_SECRET` with the credentials from your CMSCure dashboard.
+> **Replace** `YOUR_PROJECT_ID` and the app key with the values from your CMSCure dashboard. With an app key no `projectSecret` is needed; live updates sign in with the app key.
+>
+> Using the older account API key instead? Then `projectSecret` is required: `{ projectId, apiKey: 'YOUR_API_KEY', projectSecret: 'YOUR_PROJECT_SECRET' }`.
 
 #### Keys in your app
 

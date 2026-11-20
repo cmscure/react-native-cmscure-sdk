@@ -2,13 +2,19 @@
 
 All notable changes to `@cmscure/react-native-cmscure-sdk`. Versions follow semver; while the SDK is 0.x, a minor bump (0.2 to 0.3) can change setup steps, a patch never does. Pin an exact version in apps you ship.
 
+## 0.3.1 (2026-11-20)
+
+Docs only, no code change (still `@cmscure/javascript-sdk` 1.4.8).
+* Quick Start uses an app key (`cmsc_ck_...`) with no `projectSecret`; the account key variant is shown below it.
+* Expo SDK 58 iOS known issue is now in the npm README too; support matrix says Expo 55 (Android also 58).
+
 ## 0.3.0 (2026-11-20)
 
 Added
 * Expo config plugin. Add `"@cmscure/react-native-cmscure-sdk"` to `plugins` in app.json and run `expo prebuild`. It sets `ios.useFrameworks` to `static` and keeps the iOS deployment target at 14.0 or higher and Android minSdk at 24 or higher. No Podfile or Gradle edits by hand.
 * Web support for react-native-web (Expo web, browser previews). On web the same hooks and `Cure` API run on `@cmscure/javascript-sdk` (pinned to 1.4.8) instead of the native module. Data store items keep the native shape (`id`, `data[field].stringValue`, `localizedString`, `values`, `.string()`, `.double()` and so on).
 * Example app for Expo SDK 55 in `example-expo/`.
-* CI: unit tests for the web bridge, web export, and Android and iOS release builds of the example on Expo SDK 55 and 58 (New Architecture), started on an emulator and a simulator.
+* CI: unit tests for the web bridge, web export, and release builds of the example started on an emulator and a simulator: Android on Expo SDK 55 and 58, iOS on Expo SDK 55 (New Architecture). iOS on 58: see known issues.
 * `addListener` and `removeListeners` on the Android module, so `NativeEventEmitter` no longer warns.
 * App key mode: with a per project app key (`cmsc_ck_...`) as `apiKey`, `projectSecret` is optional. iOS and Android then open the live connection with the app key (`sdk:authenticate`), so revoking the key also cuts live updates. With an account API key `projectSecret` is still required and the encrypted handshake is unchanged. On web, app key mode gets live updates too (JS SDK 1.4.8).
 

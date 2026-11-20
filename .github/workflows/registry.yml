@@ -8,17 +8,17 @@ on:
       version:
         description: Package version to test
         required: true
-        default: 0.3.0
+        default: 0.3.1
   push:
     branches: [main]
     paths: ['.github/workflows/registry.yml']
 
 env:
-  VERSION: ${{ github.event.inputs.version || '0.3.0' }}
+  VERSION: ${{ github.event.inputs.version || '0.3.1' }}
 
 jobs:
   android:
-    name: Android, registry ${{ github.event.inputs.version || '0.3.0' }}, Expo 55
+    name: Android, registry ${{ github.event.inputs.version || '0.3.1' }}, Expo 55
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +49,7 @@ jobs:
           script: APP_DIR=fresh bash .github/scripts/android-smoke.sh
 
   ios:
-    name: iOS, registry ${{ github.event.inputs.version || '0.3.0' }}, Expo 55
+    name: iOS, registry ${{ github.event.inputs.version || '0.3.1' }}, Expo 55
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
