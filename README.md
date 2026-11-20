@@ -187,6 +187,7 @@ export default function App() {
 
 * For `apiKey`, prefer a per project **app key** (starts with `cmsc_ck_`). Create it in the dashboard under Project settings, API keys. It can only read that one project and you can revoke it at any time without breaking your other apps. Your account API key keeps working too.
 * With an app key, `projectSecret` is optional: leave it out and the real time connection signs in with the app key.
+* If a key is revoked, the app keeps running on its cached content and gets no new updates. Always pass a default (for example `useCureString('title', 'home', 'Welcome')`) so a missing value never shows a placeholder.
 * Anything inside an app binary can be extracted, which is fine here: the SDK keys can only read published content. `projectSecret` only encrypts the real time connection.
 
 #### The SDK only reads data
