@@ -80,6 +80,11 @@ jobs:
         expo: ['55', '58']
     steps:
       - uses: actions/checkout@v4
+      # Expo SDK 55+ needs Swift 6.2 (Xcode 26); the image default is older.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - run: xcodebuild -version
       - uses: actions/setup-node@v4
         with:
           node-version: 22
