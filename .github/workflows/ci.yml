@@ -95,9 +95,20 @@ jobs:
         run: |
           WS="$(ls -d *.xcworkspace | head -1)"
           SCHEME="${WS%.xcworkspace}"
-          set -o pipefail
           xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -50
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' ARCHS=arm64 \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1 || {
+              grep -n -E "error:|error\]" xcodebuild.log | head -80
+              grep -n -A12 "following build commands failed" xcodebuild.log
+              exit 1
+            }
+          tail -5 xcodebuild.log
       - name: Run on simulator
         run: bash .github/scripts/ios-smoke.sh
+      - name: Keep build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-expo-${{ matrix.expo }}
+          path: example-expo/ios/xcodebuild.log
+          if-no-files-found: ignore

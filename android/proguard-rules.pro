@@ -48,7 +48,3 @@
 # Socket.IO
 -keep class io.socket.** { *; }
 -keep class com.github.nkzawa.** { *; }
-
-# Compose
--dontwarn androidx.compose.**
--keep class androidx.compose.** { *; }
