@@ -1,4 +1,4 @@
-import { ReactNode, ComponentProps } from 'react';
+import { ReactElement, ReactNode } from 'react';
 import { ImageProps } from 'react-native';
 
 // ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ export interface CMSCureProviderProps {
   config?: CMSCureConfig;
 }
 
-export function CMSCureProvider(props: CMSCureProviderProps): JSX.Element;
+export function CMSCureProvider(props: CMSCureProviderProps): ReactElement;
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -159,7 +159,7 @@ export interface CureSDKImageProps extends Omit<ImageProps, 'source'> {
 }
 
 /** Renders a CMS-managed image from a URL. Returns null when url is falsy. */
-export function CureSDKImage(props: CureSDKImageProps): JSX.Element | null;
+export function CureSDKImage(props: CureSDKImageProps): ReactElement | null;
 
 // ---------------------------------------------------------------------------
 // Default export

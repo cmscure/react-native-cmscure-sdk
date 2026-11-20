@@ -248,6 +248,14 @@ class CMSCureSDKModule(private val reactContext: ReactApplicationContext) : Reac
         }
 }
     
+    // Required by NativeEventEmitter on the JS side; events are sent through
+    // RCTDeviceEventEmitter, so there is nothing to track here.
+    @ReactMethod
+    fun addListener(eventName: String) {}
+
+    @ReactMethod
+    fun removeListeners(count: Double) {}
+
     @ReactMethod
     fun sync(screenName: String, promise: Promise) {
         CMSCureSDK.sync(screenName) { success ->

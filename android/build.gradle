@@ -18,11 +18,11 @@ def getExtOrDefault(name, defaultValue) {
 android {
     namespace "com.reactnativecmscuresdk"
     
-    compileSdkVersion 35
+    compileSdkVersion getExtOrDefault("compileSdkVersion", 35)
     
     defaultConfig {
-        minSdk 24
-        targetSdk 35
+        minSdk getExtOrDefault("minSdkVersion", 24)
+        targetSdk getExtOrDefault("targetSdkVersion", 35)
         versionCode 1
         versionName "1.0"
     }
@@ -35,7 +35,7 @@ android {
         }
     }
 
-    lintOptions {
+    lint {
         abortOnError false
     }
     
@@ -47,38 +47,18 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    
-    buildFeatures {
-        compose true
-    }
-    
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.15"
-    }
 }
 
 dependencies {
-    // React Native
+    // React Native (the RN Gradle plugin maps this to react-android)
     compileOnly 'com.facebook.react:react-native:+'
     
-    // Kotlin
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$rootProject.ext.kotlinVersion"
+    // Kotlin stdlib comes from the Kotlin Gradle plugin of the host app.
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    
-    def composeBom = platform("androidx.compose:compose-bom:2024.02.00")
-    implementation composeBom
 
-    // CMSCure SDK dependencies
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    
-    // Compose (required by CMSCure SDK)
-    implementation platform('androidx.compose:compose-bom:2024.02.00')
-    implementation 'androidx.compose.ui:ui'
-    implementation 'androidx.compose.runtime:runtime'
-    implementation 'androidx.compose.material3:material3'
-    implementation "androidx.compose.ui:ui-graphics"
     
     // Networking
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
@@ -92,8 +72,7 @@ dependencies {
         exclude group: 'org.json', module: 'json'
     }
     
-    // Image loading (Coil)
-    implementation 'io.coil-kt:coil-compose:2.5.0'
-
-    implementation "androidx.compose.compiler:compiler:1.5.15"
+    // Image prefetch (plain Coil, no Jetpack Compose: Compose is not used by
+    // this module and its compiler setup breaks apps on Kotlin 2.x)
+    implementation 'io.coil-kt:coil:2.5.0'
 }

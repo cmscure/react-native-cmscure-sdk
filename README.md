@@ -23,7 +23,8 @@ The official React Native SDK for [CMSCure](https://cmscure.com) — deliver tra
 
 | Requirement | Minimum |
 |---|---|
-| React Native | 0.71+ |
+| React Native | 0.71+ (New Architecture supported) |
+| Expo | Development build; tested on SDK 55 and 58 |
 | iOS Target | 14.0+ |
 | Android API | 24+ |
 
@@ -38,6 +39,34 @@ npm install @cmscure/react-native-cmscure-sdk
 # --- or ---
 yarn add @cmscure/react-native-cmscure-sdk
 ```
+
+### Expo (recommended for new apps)
+
+The package ships an Expo config plugin, so no Podfile or Gradle edits are needed:
+
+```bash
+npx expo install @cmscure/react-native-cmscure-sdk
+```
+
+```json
+{
+  "expo": {
+    "plugins": ["@cmscure/react-native-cmscure-sdk"]
+  }
+}
+```
+
+Then run `npx expo prebuild` (or build with EAS). The plugin sets `ios.useFrameworks` to `static` and makes sure the iOS deployment target is at least 14.0 and Android minSdk at least 24. If your app already sets `ios.useFrameworks` through `expo-build-properties`, keep it at `static`; to stop the plugin from touching it use `["@cmscure/react-native-cmscure-sdk", { "ios": { "useFrameworks": false } }]`.
+
+This is a native module, so it does not run in Expo Go. Use a development build (`npx expo run:ios`, `npx expo run:android` or `eas build --profile development`). Tested on Expo SDK 55 and 58 with the New Architecture, see [`example-expo/`](example-expo/).
+
+### Web (react-native-web)
+
+On web the package uses `@cmscure/javascript-sdk` under the hood (installed with it), so the same hooks and `Cure` calls work in Expo web and browser previews. Nothing to configure.
+
+### Bare React Native
+
+Steps 2 and 3 below are only for apps without Expo prebuild.
 
 ### Step 2: iOS Configuration (Required)
 
@@ -150,6 +179,15 @@ export default function App() {
 ```
 
 > **Replace** `YOUR_PROJECT_ID`, `YOUR_API_KEY`, and `YOUR_PROJECT_SECRET` with the credentials from your CMSCure dashboard.
+
+#### Keys in your app
+
+* For `apiKey`, prefer a per project **app key** (starts with `cmsc_ck_`). Create it in the dashboard under Project settings, API keys. It can only read that one project and you can revoke it at any time without breaking your other apps. Your account API key keeps working too.
+* Anything inside an app binary can be extracted, which is fine here: the SDK keys can only read published content. `projectSecret` only encrypts the real time connection.
+
+#### The SDK only reads data
+
+The SDK downloads strings, translations, colors, image URLs and data store rows. It never runs remote code, never builds screens from a remote layout and cannot write to your project. Content you publish reaches apps that are already in the App Store and Google Play, so use it for content. Switching on features the store review never saw, or changing what the app does, needs a new store release.
 
 ---
 
@@ -375,7 +413,8 @@ Both examples use the keys from the Quick Start table above.
 ## Troubleshooting
 
 - **Hooks not working?** Make sure your component is inside `<CMSCureProvider>`.
-- **iOS build fails?** Ensure `use_frameworks! :linkage => :static` is in your `Podfile` and you ran `pod install`.
+- **Expo: "CMSCureSDK native module is not available"?** You are in Expo Go. Add the plugin and use a development build.
+- **iOS build fails?** Ensure `use_frameworks! :linkage => :static` is in your `Podfile` (Expo: the plugin does this) and you ran `pod install`.
 - **Android build fails?** Ensure `minSdkVersion` is at least `24`.
 - **Content not updating?** Check that `enableAutoRealTimeUpdates` is `true` (default) in your config.
 

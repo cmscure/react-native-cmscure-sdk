@@ -1,11 +1,11 @@
 {
   "name": "@cmscure/react-native-cmscure-sdk",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "React Native SDK for CMSCure. Manage UI content, styles, and data stores in real-time.",
   "main": "src/index.js",
   "types": "index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.mjs",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typescript": "tsc --noEmit --skipLibCheck"
   },
@@ -25,7 +25,10 @@
     "localization",
     "content-management",
     "websockets",
-    "real-time"
+    "real-time",
+    "expo",
+    "expo-config-plugin",
+    "react-native-web"
   ],
   "author": "CMSCure",
   "license": "MIT",
@@ -38,7 +41,8 @@
   },
   "peerDependencies": {
     "react": ">=17.0.2",
-    "react-native": ">=0.71.0"
+    "react-native": ">=0.71.0",
+    "expo": "*"
   },
   "devDependencies": {
     "@types/react": "^18.0.0",
@@ -49,13 +53,24 @@
   },
   "files": [
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "android/",
     "ios/",
     "src/",
     "index.d.ts",
+    "app.plugin.js",
+    "react-native.config.js",
     "react-native-cmscure-sdk.podspec"
   ],
   "react-native": "src/index.js",
-  "source": "src/index.js"
+  "source": "src/index.js",
+  "dependencies": {
+    "@cmscure/javascript-sdk": "1.4.7"
+  },
+  "peerDependenciesMeta": {
+    "expo": {
+      "optional": true
+    }
+  }
 }

@@ -1,29 +1,14 @@
-import { 
-  NativeModules, 
-  NativeEventEmitter, 
-  Platform,
-  Image, View, ActivityIndicator, I18nManager
-} from 'react-native';
+import { Image, View, ActivityIndicator } from 'react-native';
 import React, { 
   createContext, 
   useContext, 
   useState, 
   useEffect, 
   useRef, 
-  useCallback,
   useMemo
 } from 'react';
-
-const { CMSCureSDK } = NativeModules;
-
-if (!CMSCureSDK) {
-  throw new Error(
-    'CMSCureSDK native module is not available. ' +
-    'Please check your installation and rebuild your app.'
-  );
-}
-
-const eventEmitter = new NativeEventEmitter(CMSCureSDK);
+// Native module on iOS/Android, @cmscure/javascript-sdk on web (bridge.web.js).
+import { bridge } from './bridge';
 
 // ---------------------------------------------------------------------------
 // Language Direction & Display Utilities (pure JS — no native bridge needed)
@@ -193,33 +178,24 @@ export const Cure = {
       throw new Error('CMSCure configuration requires projectId, apiKey, and projectSecret.');
     }
 
-    if (Platform.OS === 'ios') {
-      return CMSCureSDK.configure(projectId, apiKey, projectSecret);
-    }
-
-    return CMSCureSDK.configure(
-      projectId,
-      apiKey,
-      projectSecret,
-      enableAutoRealTimeUpdates,
-    );
+    return bridge.configure({ projectId, apiKey, projectSecret, enableAutoRealTimeUpdates });
   },
 
-  setLanguage: (languageCode) => CMSCureSDK.setLanguage(languageCode),
-  getLanguage: () => CMSCureSDK.getLanguage(),
-  availableLanguages: () => CMSCureSDK.availableLanguages(),
-  translation: (key, tab) => CMSCureSDK.translation(key, tab),
-  colorValue: (key) => CMSCureSDK.colorValue(key),
-  imageURL: (key) => CMSCureSDK.imageURL(key),
+  setLanguage: (languageCode) => bridge.setLanguage(languageCode),
+  getLanguage: () => bridge.getLanguage(),
+  availableLanguages: () => bridge.availableLanguages(),
+  translation: (key, tab) => bridge.translation(key, tab),
+  colorValue: (key) => bridge.colorValue(key),
+  imageURL: (key) => bridge.imageURL(key),
   getStoreItems: async (apiIdentifier) => {
-    const raw = await CMSCureSDK.getStoreItems(apiIdentifier);
+    const raw = await bridge.getStoreItems(apiIdentifier);
     return wrapDataStoreItems(raw);
   },
   syncStore: async (apiIdentifier) => {
-    const raw = await CMSCureSDK.syncStore(apiIdentifier);
+    const raw = await bridge.syncStore(apiIdentifier);
     return wrapDataStoreItems(raw);
   },
-  sync: (screenName) => CMSCureSDK.sync(screenName),
+  sync: (screenName) => bridge.sync(screenName),
 };
 
 // ---------------------------------------------------------------------------
@@ -266,7 +242,7 @@ export const CMSCureProvider = ({ children, config }) => {
 
     initializeSDK();
 
-    const subscription = eventEmitter.addListener('CMSCureContentUpdate', (event) => {
+    const subscription = bridge.addUpdateListener((event) => {
       if (!isMounted) return;
       updateCounterRef.current = { id: event.identifier, time: Date.now() };
       forceRender((c) => !c);
