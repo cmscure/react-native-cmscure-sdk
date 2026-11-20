@@ -197,7 +197,9 @@ object CMSCureSDK {
         projectSecret: String,
         enableAutoRealTimeUpdates: Boolean = true
     ) {
-        if (projectId.isBlank() || apiKey.isBlank() || projectSecret.isBlank()) {
+        // projectSecret may be empty only with a per project app key
+        // (cmsc_ck_); the socket then signs in with sdk:authenticate.
+        if (projectId.isBlank() || apiKey.isBlank() || (projectSecret.isBlank() && !isClientKey(apiKey))) {
             logError("Config failed: Project ID, API Key, and Project Secret cannot be empty.")
             return
         }
@@ -221,7 +223,7 @@ object CMSCureSDK {
             }
         }
 
-        deriveSymmetricKey(projectSecret)
+        if (projectSecret.isNotBlank()) deriveSymmetricKey(projectSecret)
 
         val loggingInterceptor = HttpLoggingInterceptor { message ->
             if (debugLogsEnabled) Log.d("$TAG-OkHttp", message)
@@ -445,7 +447,20 @@ object CMSCureSDK {
         }
     }
 
+    private fun isClientKey(key: String) = key.startsWith("cmsc_ck_")
+
     private fun sendSocketHandshake(projectId: String) {
+        val config = getCurrentConfiguration()
+        if (config != null && config.projectSecret.isBlank() && isClientKey(config.apiKey)) {
+            // App key handshake over TLS: { projectId, clientKey }, answered by handshake_ack.
+            logDebug("🤝 Sending app key handshake for projectId: $projectId")
+            val payload = org.json.JSONObject().apply {
+                put("projectId", projectId)
+                put("clientKey", config.apiKey)
+            }
+            socket?.emit("sdk:authenticate", payload)
+            return
+        }
         val currentSymKey = symmetricKey ?: run { logError("Handshake failed: Symmetric key is missing."); return }
         logDebug("🤝 Sending handshake for projectId: $projectId")
         try {

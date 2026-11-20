@@ -7,8 +7,10 @@ import { ImageProps } from 'react-native';
 
 export interface CMSCureConfig {
   projectId: string;
+  /** Account API key or a per project app key (cmsc_ck_...). */
   apiKey: string;
-  projectSecret: string;
+  /** Required with an account API key; optional with an app key (cmsc_ck_...). */
+  projectSecret?: string;
   enableAutoRealTimeUpdates?: boolean;
 }
 

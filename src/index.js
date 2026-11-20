@@ -174,11 +174,14 @@ export const Cure = {
       enableAutoRealTimeUpdates = true,
     } = config;
 
-    if (!projectId || !apiKey || !projectSecret) {
-      throw new Error('CMSCure configuration requires projectId, apiKey, and projectSecret.');
+    // projectSecret is optional with a per project app key (cmsc_ck_); the
+    // live connection then signs in with the app key.
+    const isAppKey = typeof apiKey === 'string' && apiKey.startsWith('cmsc_ck_');
+    if (!projectId || !apiKey || (!projectSecret && !isAppKey)) {
+      throw new Error('CMSCure configuration requires projectId, apiKey, and projectSecret (projectSecret is optional with an app key, cmsc_ck_...).');
     }
 
-    return bridge.configure({ projectId, apiKey, projectSecret, enableAutoRealTimeUpdates });
+    return bridge.configure({ projectId, apiKey, projectSecret: projectSecret || '', enableAutoRealTimeUpdates });
   },
 
   setLanguage: (languageCode) => bridge.setLanguage(languageCode),

@@ -430,7 +430,9 @@ public class CMSCureSDK: NSObject {
         // Ensure configuration parameters are valid.
         guard !projectId.isEmpty else { self.logError("Configuration failed: Project ID cannot be empty."); return }
         guard !apiKey.isEmpty else { self.logError("Configuration failed: API Key cannot be empty."); return }
-        guard !projectSecret.isEmpty else { self.logError("Configuration failed: Project Secret cannot be empty."); return }
+        // projectSecret may be empty only with a per project app key (cmsc_ck_);
+        // the socket then signs in with sdk:authenticate instead.
+        guard !projectSecret.isEmpty || Self.isClientKey(apiKey) else { self.logError("Configuration failed: Project Secret cannot be empty."); return }
         
         self.logDebug("Creating configuration object")
         
@@ -455,7 +457,9 @@ public class CMSCureSDK: NSObject {
         self.logDebug("Configuration stored, deriving cryptographic key")
         
         // Asynchronously derive the cryptographic key on the cache queue.
-        cacheQueue.async(flags: .barrier) {
+        // Not needed in app key mode (no projectSecret).
+        if !projectSecret.isEmpty {
+            cacheQueue.async(flags: .barrier) {
                 self.apiSecret = projectSecret
                 if let secretData = projectSecret.data(using: .utf8) {
                     self.symmetricKey = SymmetricKey(data: SHA256.hash(data: secretData))
@@ -463,6 +467,7 @@ public class CMSCureSDK: NSObject {
                 } else {
                     self.logError("Failed to convert project secret to UTF-8 data")
                 }
+            }
         }
         
         self.logDebug("Starting authentication process")
@@ -482,6 +487,9 @@ public class CMSCureSDK: NSObject {
     
     /// Internal helper to safely retrieve the current SDK configuration.
     /// - Returns: The `CureConfiguration` if the SDK has been configured, otherwise `nil`.
+    /// True for per project app keys (cmsc_ck_), which may run without a projectSecret.
+    static func isClientKey(_ key: String) -> Bool { key.hasPrefix("cmsc_ck_") }
+
     internal func getCurrentConfiguration() -> CureConfiguration? {
         var currentConfig: CureConfiguration?
         configQueue.sync { // Thread-safe read.
@@ -1668,7 +1676,7 @@ public class CMSCureSDK: NSObject {
             return
         }
         // Legacy handshake requires projectSecret. Ensure it's available.
-        guard !config.projectSecret.isEmpty else {
+        guard !config.projectSecret.isEmpty || Self.isClientKey(config.apiKey) else {
             self.logError("Cannot connect socket for legacy handshake: Project Secret is missing in configuration.")
             return
         }
@@ -1869,6 +1877,16 @@ public class CMSCureSDK: NSObject {
         var projectSecretForHandshake: String?
         // Safely read the projectSecret from the configuration.
         cacheQueue.sync { projectSecretForHandshake = self.configuration?.projectSecret }
+
+        // App key handshake over TLS: { projectId, clientKey }, answered by handshake_ack.
+        if (projectSecretForHandshake ?? "").isEmpty, let config = getCurrentConfiguration(), Self.isClientKey(config.apiKey) {
+            self.logDebug("🤝 Sending app key handshake to server...")
+            let payload: [String: Any] = ["projectId": projectId, "clientKey": config.apiKey]
+            DispatchQueue.main.async {
+                self.socket?.emit("sdk:authenticate", payload)
+            }
+            return
+        }
         
         guard let secret = projectSecretForHandshake, !secret.isEmpty else {
             self.logError("❌ Cannot send legacy handshake: Project secret is not available in configuration.")

@@ -10,6 +10,7 @@ Added
 * Example app for Expo SDK 55 in `example-expo/`.
 * CI: unit tests for the web bridge, web export, and Android and iOS release builds of the example on Expo SDK 55 and 58 (New Architecture), started on an emulator and a simulator.
 * `addListener` and `removeListeners` on the Android module, so `NativeEventEmitter` no longer warns.
+* App key mode: with a per project app key (`cmsc_ck_...`) as `apiKey`, `projectSecret` is optional. iOS and Android then open the live connection with the app key (`sdk:authenticate`), so revoking the key also cuts live updates. With an account API key `projectSecret` is still required and the encrypted handshake is unchanged. On web, app key mode reads content but has no live updates yet.
 
 Changed
 * Android: Jetpack Compose removed from the module build. The module never used Compose, and the Compose compiler settings broke builds on Kotlin 2.x (React Native 0.77 and later, every current Expo SDK). Image prefetch uses plain Coil.
